@@ -1,0 +1,18 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Run livepreview extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-livepreview"
+			],
+			"outFiles": [
+				"${workspaceFolder}/packages/vscode-livepreview/out/**/*.js"
+			],
+			"preLaunchTask": "npm: compile"
+		}
+	]
+}

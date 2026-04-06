@@ -1,0 +1,15 @@
+{
+  "name": "nojsx-minimal",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npx tsc -p ./tsconfig.json && nojsx-build-css --input ./src/styles/app.css --output ./dist/app.css --source ./src"
+  },
+  "dependencies": {
+    "nojsx": "file:../../nojsx.tgz"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}

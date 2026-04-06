@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node", "bun-types"],
+    "sourceMap": true,
+    "declaration": false,
+    "outDir": "./dist/scripts",
+    "rootDir": "./scripts",
+    "skipLibCheck": true
+  },
+  "include": ["./scripts/**/*.ts"],
+  "exclude": [
+    "./node_modules",
+    "./dist",
+    "./packages"
+  ]
+}

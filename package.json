@@ -1,0 +1,54 @@
+{
+	"name": "nojsx",
+	"version": "1.0.5",
+	"type": "module",
+	"scripts": {
+		"clean:dist": "bun scripts/clean-dist.ts",
+		"build": "bun run clean:dist && bunx tsc -p tsconfig.json && bunx tsc -p tsconfig.scripts.json && bun scripts/assert-dist-relative-import-extensions.ts && bun scripts/mirror-dist-to-root.ts",
+		"compile": "bun run build",
+		"pack:tgz": "bun run build && bun scripts/pack-tgz.ts",
+		"example:minimal": "npm --prefix ./examples/nojsx-minimal install && npm --prefix ./examples/nojsx-minimal run build",
+		"test:tgz:minimal": "bun run pack:tgz && npm --prefix ./examples/nojsx-minimal install && npm --prefix ./examples/nojsx-minimal run build"
+	},
+	"bin": {
+		"nojsx-build-css": "./dist/scripts/build-tailwind.js"
+	},
+	"main": "./dist/jsx-runtime.js",
+	"types": "./dist/jsx-runtime.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/jsx-runtime.d.ts",
+			"import": "./dist/jsx-runtime.js"
+		},
+		"./live-preview-runner": "./dist/live-preview/render-tsx-preview.js",
+		"./jsx-runtime": {
+			"types": "./dist/jsx-runtime.d.ts",
+			"import": "./dist/jsx-runtime.js"
+		},
+		"./jsx-dev-runtime": {
+			"types": "./dist/jsx-dev-runtime.d.ts",
+			"import": "./dist/jsx-dev-runtime.js"
+		},
+		"./core/styles/nojsx.css": "./src/core/styles/nojsx.css",
+		"./core/*": {
+			"types": "./dist/core/*.d.ts",
+			"import": "./dist/core/*.js"
+		}
+	},
+	"files": [
+		"src/core/styles",
+		"configs/tailwind",
+		"dist"
+	],
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@types/node": "^25.5.2",
+		"bun": "latest",
+		"typescript": "^6.0.2"
+	},
+	"dependencies": {
+		"@tailwindcss/cli": "^4.2.2",
+		"@tailwindcss/forms": "^0.5.11",
+		"tailwindcss": "^4.2.2"
+	}
+}
