@@ -38,7 +38,6 @@ function ensureNojsxGlobalsInitialized(): void {
 	g.__nojsxSlotCaptureStack = g.__nojsxSlotCaptureStack ?? [];
 	g.__nojsxSlotCaptureData = g.__nojsxSlotCaptureData ?? new Map<number, Record<string, string>>();
 	g.__nojsxDebugSlots = g.__nojsxDebugSlots ?? false;
-	(g as any).__nojsxDebugPreserveChildren = (g as any).__nojsxDebugPreserveChildren ?? true;
 
 	// Wire proxy implementations (see jsx-globals.ts)
 	(g as any).__nojsx_jsx_impl = jsx;

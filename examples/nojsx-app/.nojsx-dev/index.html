@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" class="dark" data-theme="theme-emerald-night">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src &#39;self&#39;; script-src &#39;self&#39; &#39;unsafe-eval&#39; &#39;unsafe-inline&#39;; style-src &#39;self&#39; &#39;unsafe-inline&#39;; img-src &#39;self&#39; data:; connect-src &#39;self&#39;;" />
+    <title>NUI</title>
+    <script nonce="nsx-importmap" type="importmap">
+      {
+        "imports": {
+          "nojsx/jsx-runtime": "http://127.0.0.1:4179/nojsx/jsx-runtime.js",
+          "nojsx/jsx-dev-runtime": "http://127.0.0.1:4179/nojsx/jsx-dev-runtime.js",
+          "nojsx/core/components/components": "http://127.0.0.1:4179/nojsx/core/components/components.js",
+          "nojsx/core/components/nav-outlet": "http://127.0.0.1:4179/nojsx/core/components/nav-outlet.js",
+          "nojsx/core/components/shell-page-parent": "http://127.0.0.1:4179/nojsx/core/components/shell-page-parent.js",
+          "nojsx/core/components/shell-page-parent-renderer": "http://127.0.0.1:4179/nojsx/core/components/shell-page-parent-renderer.js",
+          "nojsx/core/util/client-bootstrap": "http://127.0.0.1:4179/nojsx/core/util/client-bootstrap.js",
+          "nojsx/core/global/registry": "http://127.0.0.1:4179/nojsx/core/global/registry.js"
+        }
+      }
+    </script>
+
+<link rel="stylesheet" href="http://127.0.0.1:4179/src/styles/app.css" />
+  </head>
+  <body class="bg-white text-gray-800 dark:bg-black dark:text-neutral-200">
+<div></div>
+    <div id="info"></div>
+<script type="module" src="http://127.0.0.1:4179/src/main.js"></script>
+<script>
+(() => {
+  const removeDiagnostics = () => {
+    document.getElementById('nojsx-live-preview-diagnostics')?.remove();
+  };
+  removeDiagnostics();
+  window.addEventListener('load', removeDiagnostics, { once: true });
+  new MutationObserver(() => removeDiagnostics()).observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script>
+<div></div>
+<div></div>
+  </body>
+</html>

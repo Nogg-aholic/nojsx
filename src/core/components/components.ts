@@ -100,7 +100,6 @@ export abstract class NComponent {
 		const currentEntry = componentRegistry.get(this.id);
 		const htmlFn = currentEntry.result.html;
 		if (typeof htmlFn !== 'function') return;
-		const debugPreserve = !!(globalThis as any).__nojsxDebugPreserveChildren;
 		const preservedChildElements = new Map<string, Element>();
 		const directChildIds = [...currentEntry.childIds];
 		const descendantIds: string[] = [];
@@ -119,52 +118,23 @@ export abstract class NComponent {
 			const childEl = document.querySelector(`[data-component-id="${childId}"]`);
 			if (childEl) preservedChildElements.set(childId, childEl);
 		}
-		const shouldLogThisRender = debugPreserve && shouldLogPreserveForAny([this.id, ...directChildIds, ...descendantIds]);
-		if (shouldLogThisRender) {
-			console.log('[nojsx:preserve] render-start', {
-				componentId: this.id,
-				directChildIds,
-				descendantIds,
-				preservedDomCount: preservedChildElements.size,
-			});
-		}
 		const before = componentRegistry.getRenderParent();
 		try {
 			componentRegistry.setRenderParent(this.id);
 			componentRegistry.beginPreserveChildren(descendantIds, directChildIds);
-			if (shouldLogThisRender) {
-				console.log('[nojsx:preserve] before-prepare', {
-					componentId: this.id,
-					snapshot: componentRegistry.getPreserveDebugSnapshot(),
-				});
-			}
 			componentRegistry.prepareChildRender(this.id, currentEntry);
 			const html = this.__renderHtml(this.id, this.__props?.class);
 			el.outerHTML = html;
 		} finally {
-			if (shouldLogThisRender) {
-				console.log('[nojsx:preserve] before-end', {
-					componentId: this.id,
-					snapshot: componentRegistry.getPreserveDebugSnapshot(),
-				});
-			}
 			componentRegistry.endPreserveChildren();
 			componentRegistry.setRenderParent(before ?? '');
 		}
 
-		let reattachedCount = 0;
 		for (const [childId, preservedEl] of preservedChildElements.entries()) {
+			if (!componentRegistry.has(childId)) continue;
 			const placeholder = document.querySelector(`[data-component-id="${childId}"]`);
 			if (!placeholder || !placeholder.parentNode) continue;
 			placeholder.parentNode.replaceChild(preservedEl, placeholder);
-			reattachedCount++;
-		}
-		if (shouldLogThisRender) {
-			console.log('[nojsx:preserve] render-end', {
-				componentId: this.id,
-				reattachedCount,
-				preservedDomCount: preservedChildElements.size,
-			});
 		}
 
 		refreshClientUiBindings();
@@ -189,6 +159,22 @@ export abstract class NComponent {
 
 	// Captured construction props for rendering (used by injected render())
 	private __props?: NComponentProps;
+	private __didLoad = false;
+
+	private __runOnLoadOnce(): void {
+		if (this.__didLoad || isServer || typeof this.onLoad !== 'function') return;
+		this.__didLoad = true;
+		try {
+			const out = this.onLoad.call(this);
+			if (out && typeof (out as PromiseLike<unknown>).then === 'function') {
+				(out as Promise<unknown>).catch((e) => {
+					console.warn(`[nojsx:onLoad] async onLoad failed for ${this.id}`, e);
+				});
+			}
+		} catch (e) {
+			console.warn(`[nojsx:onLoad] onLoad failed for ${this.id}`, e);
+		}
+	}
 
 	private __renderHtml(componentId: string, className?: string): string {
 		const original = (this as any).html;
@@ -196,13 +182,16 @@ export abstract class NComponent {
 			throw new Error(`[NComponent] Missing html() implementation for component ${this.id}`);
 		}
 		clearInlineHandlersForComponent(componentId);
+		const prevRenderParent = componentRegistry.getRenderParent();
 		const prev = setRenderContext(componentId);
 		try {
+			componentRegistry.setRenderParent(componentId);
 			if (original.length === 0) {
 				return injectAttributes(String((original as unknown as () => unknown).call(this)), componentId, className);
 			}
 			return String((original as unknown as (componentId: string, className?: string) => unknown).call(this, componentId, className));
 		} finally {
+			componentRegistry.setRenderParent(prevRenderParent ?? '');
 			setRenderContext(prev);
 		}
 	}
@@ -223,6 +212,7 @@ export abstract class NComponent {
 
 	// Placeholder HTML used during initial client construction.
 	__html(): string {
+		this.__runOnLoadOnce();
 		return this.__renderHtml(this.id, this.__props?.class);
 	}
 }

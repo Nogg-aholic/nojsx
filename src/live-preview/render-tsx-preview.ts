@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 
+import { compilePreview } from './compile-tsx-preview.js';
+
 type ProviderInfo = {
   jsxImportSource: string;
   projectRoot: string;
@@ -250,31 +252,39 @@ function resolveProviderSpecifier(provider: ProviderInfo, specifier: string): st
 
 function rewriteProviderImportsForNode(source: string, provider: ProviderInfo): string {
   const prefix = `${provider.jsxImportSource}/`;
-  return source.replace(/(from\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => {
+  const rewriteSpecifier = (specifier: string): string => {
     if (!specifier.startsWith(prefix)) {
-      return `${start}${specifier}${end}`;
+      return specifier;
     }
 
     const targetPath = resolveProviderSpecifier(provider, specifier);
-    return `${start}${pathToFileURL(targetPath).href}${end}`;
-  });
+    return pathToFileURL(targetPath).href;
+  };
+
+  return source
+    .replace(/(from\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => `${start}${rewriteSpecifier(specifier)}${end}`)
+    .replace(/(import\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => `${start}${rewriteSpecifier(specifier)}${end}`);
 }
 
 function rewriteProviderImportsForBrowser(source: string, httpPort: number | undefined, provider: ProviderInfo): string {
   const prefix = `${provider.jsxImportSource}/`;
-  return source.replace(/(from\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => {
+  const rewriteSpecifier = (specifier: string): string => {
     if (!specifier.startsWith(prefix)) {
-      return `${start}${specifier}${end}`;
+      return specifier;
     }
 
     if (!(typeof httpPort === 'number' && Number.isFinite(httpPort))) {
       throw new Error('[livePreview] httpPort is required to build browser preview modules.');
     }
+
     const targetPath = resolveProviderSpecifier(provider, specifier);
     const relativeTarget = path.relative(findNearestPackageRoot(provider.projectRoot), targetPath).replace(/\\/g, '/');
-    const targetUrl = `http://127.0.0.1:${httpPort}/${relativeTarget}`;
-    return `${start}${targetUrl}${end}`;
-  });
+    return `http://127.0.0.1:${httpPort}/${relativeTarget}`;
+  };
+
+  return source
+    .replace(/(from\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => `${start}${rewriteSpecifier(specifier)}${end}`)
+    .replace(/(import\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => `${start}${rewriteSpecifier(specifier)}${end}`);
 }
 
 function createDataModuleUrl(source: string): string {
@@ -289,17 +299,117 @@ function stripPreviewBootstrap(source: string): string {
 
 function createAutoMountEntryModuleSource(entryModuleUrl: string): string {
   return [
-    `import { livePreviewJSX, getLivePreviewHtml } from ${JSON.stringify((globalThis as any).__livePreview.jsxRuntimeSpecifier)};`,
+    `import { getLivePreviewHtml } from ${JSON.stringify((globalThis as any).__livePreview.jsxRuntimeSpecifier)};`,
+    `import { bootstrapClientRuntime } from ${JSON.stringify(`${(globalThis as any).__livePreview.jsxImportSource}/core/util/client-bootstrap`)};`,
     `import * as entry from ${JSON.stringify(entryModuleUrl)};`,
+    `const g = globalThis;`,
+    `const mountId = globalThis.__livePreview?.appHostId || 'app';`,
     `const candidates = [entry.preview, entry.default, entry.App, entry.Page, entry.Root];`,
-    `const rootExport = candidates.find((value) => typeof value === 'function' && typeof value.prototype?.__html === 'function');`,
+    `const namedRootExport = candidates.find((value) => typeof value === 'function' && typeof value.prototype?.__html === 'function');`,
+    `const exportedEntries = Object.entries(entry).filter(([key, value]) => key !== 'default' && typeof value === 'function' && typeof value.prototype?.__html === 'function');`,
+    `const fallbackRootExport = exportedEntries.length > 0 ? exportedEntries[exportedEntries.length - 1][1] : undefined;`,
+    `const rootExport = namedRootExport ?? fallbackRootExport;`,
+    `function splitPath(fullPath) {`,
+    `  const qIndex = fullPath.indexOf('?');`,
+    `  if (qIndex === -1) return { pathname: fullPath || '/', query: '' };`,
+    `  return { pathname: fullPath.slice(0, qIndex) || '/', query: fullPath.slice(qIndex + 1) };`,
+    `}`,
+    `function normalizeRoutePath(pathname) {`,
+    `  if (!pathname) return '/';`,
+    `  return pathname.startsWith('/') ? pathname : '/' + pathname;`,
+    `}`,
+    `function getPreviewNavPath() {`,
+    `  const configured = g.__livePreviewRequestPath || g.__livePreview?.requestPath;`,
+    `  if (typeof configured === 'string' && configured.trim()) return normalizeRoutePath(configured.trim());`,
+    `  if (typeof window === 'undefined') return '/';`,
+    `  const currentUrl = new URL(window.location.href);`,
+    `  const routeQuery = currentUrl.searchParams.get('__nojsx_route');`,
+    `  if (routeQuery && routeQuery.trim()) return normalizeRoutePath(routeQuery.trim());`,
+    `  const rawHash = window.location.hash || '';`,
+    `  if (rawHash.startsWith('#/')) return rawHash.slice(1);`,
+    `  return '/home';`,
+    `}`,
+    `function updatePreviewLocation(pathValue) {`,
+    `  if (typeof window === 'undefined') return;`,
+    `  const normalized = normalizeRoutePath(pathValue);`,
+    `  const currentUrl = new URL(window.location.href);`,
+    `  currentUrl.searchParams.set('vscode-livepreview', 'true');`,
+    `  if (normalized === '/home') currentUrl.searchParams.delete('__nojsx_route');`,
+    `  else currentUrl.searchParams.set('__nojsx_route', normalized);`,
+    `  try { window.history.pushState({}, '', currentUrl.toString()); } catch {}`,
+    `}`,
+    `function syncNavState(pathValue) {`,
+    `  const normalized = normalizeRoutePath(pathValue);`,
+    `  const next = splitPath(normalized);`,
+    `  g.__nojsxNav = g.__nojsxNav ?? {};`,
+    `  g.__nojsxNav.path = normalized;`,
+    `  g.__nojsxNav.pathname = next.pathname;`,
+    `  g.__nojsxNav.query = next.query;`,
+    `}`,
+    `let rootShellComponent = null;`,
+    `function getRootInstance() {`,
+    `  if (!rootShellComponent) {`,
+    `    rootShellComponent = new rootExport({});`,
+    `  }`,
+    `  return rootShellComponent;`,
+    `}`,
+    `function renderRootShell() {`,
+    `  const mount = document.getElementById(mountId);`,
+    `  if (!mount) throw new Error('Missing live preview mount element: #' + mountId);`,
+    `  const component = getRootInstance();`,
+    `  const componentId = String(component?.id ?? '');`,
+    `  const hasMountedRoot = componentId.length > 0 && !!document.querySelector('[data-component-id="' + componentId + '"]');`,
+    `  if (hasMountedRoot && typeof component?.render === 'function') {`,
+    `    component.render();`,
+    `    return;`,
+    `  }`,
+    `  const html = typeof component?.__html === 'function' ? component.__html() : '';`,
+    `  mount.innerHTML = html;`,
+    `}`,
+    `function renderPreviewRoute() {`,
+    `  const outlet = g.__nojsxNavOutlet;`,
+    `  if (outlet && typeof outlet.render === 'function') {`,
+    `    outlet.render();`,
+    `    return;`,
+    `  }`,
+    `  renderRootShell();`,
+    `  const mountedOutlet = g.__nojsxNavOutlet;`,
+    `  if (mountedOutlet && typeof mountedOutlet.render === 'function') {`,
+    `    mountedOutlet.render();`,
+    `  }`,
+    `}`,
+    `function syncFromLocation() {`,
+    `  syncNavState(getPreviewNavPath());`,
+    `  renderPreviewRoute();`,
+    `}`,
+    `function wirePreviewNavigation() {`,
+    `  if (typeof window === 'undefined') return;`,
+    `  if (window.__nojsxPreviewNavWired) return;`,
+    `  window.__nojsxPreviewNavWired = true;`,
+    `  document.addEventListener('click', (event) => {`,
+    `    const target = event.target;`,
+    `    const anchor = target?.closest ? target.closest('a') : null;`,
+    `    if (!anchor) return;`,
+    `    const rawHref = anchor.getAttribute('href')?.trim();`,
+    `    if (!rawHref) return;`,
+    `    const isInternal = rawHref.startsWith('/') || rawHref.startsWith('#') || !rawHref.includes(':');`,
+    `    if (!isInternal || rawHref.startsWith('#')) return;`,
+    `    event.preventDefault();`,
+    `    syncNavState(rawHref);`,
+    `    updatePreviewLocation(rawHref);`,
+    `    renderPreviewRoute();`,
+    `  });`,
+    `  window.addEventListener('popstate', syncFromLocation);`,
+    `  window.addEventListener('hashchange', syncFromLocation);`,
+    `}`,
     `if (!rootExport) {`,
-    `  throw new Error('Live preview entry module must export an NComponent root as preview, default, App, Page, or Root.');`,
+    `  throw new Error('Live preview entry module must export an NComponent root as preview, default, App, Page, Root, or another exported NComponent class/function.');`,
     `}`,
     `if (!globalThis.__livePreviewMode && !globalThis.live_preview) {`,
-    `  const root = document.getElementById('app');`,
-    `  if (!root) throw new Error('Missing #app element');`,
-    `  livePreviewJSX(rootExport, {}, { mount: root });`,
+    `  globalThis.__nojsxDevPreviewMode = true;`,
+    `  bootstrapClientRuntime();`,
+    `  wirePreviewNavigation();`,
+    `  syncFromLocation();`,
     `}`,
     `if (globalThis.__livePreviewMode || globalThis.live_preview) {`,
     `  globalThis.__livePreviewHtml = await getLivePreviewHtml();`,
@@ -373,18 +483,178 @@ function discoverImportedCssFiles(filePath: string, sourceText: string): string[
   return [...imports];
 }
 
-function discoverFallbackCssFiles(filePath: string): string[] {
-  const exampleRoot = path.dirname(filePath);
+async function discoverFallbackCssFiles(filePath: string): Promise<string[]> {
+  return discoverFallbackCssFilesFrom(filePath);
+}
+
+async function discoverFallbackCssFilesFrom(filePath: string): Promise<string[]> {
+  const projectRoot = findNearestPackageRoot(filePath);
+  const discovered = new Set<string>();
+  let current = path.dirname(filePath);
+  let discoveredSrcDir: string | undefined;
+
+  while (true) {
+    const srcDir = path.join(current, 'src');
+    if (existsSync(srcDir)) {
+      discoveredSrcDir = srcDir;
+      const candidates = [
+        path.join(srcDir, 'app.input.css'),
+        path.join(srcDir, 'app.css'),
+        path.join(srcDir, 'styles', 'app.input.css'),
+        path.join(srcDir, 'styles', 'app.css'),
+      ];
+
+      for (const candidate of candidates) {
+        if (existsSync(candidate)) {
+          discovered.add(candidate);
+        }
+      }
+      break;
+    }
+
+    if (path.resolve(current) === path.resolve(projectRoot)) {
+      break;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current || !path.resolve(parent).startsWith(path.resolve(projectRoot))) {
+      break;
+    }
+    current = parent;
+  }
+
+  if (discoveredSrcDir) {
+    const stylesDir = path.join(discoveredSrcDir, 'styles');
+    if (existsSync(stylesDir)) {
+      try {
+        const styleFiles = await readdir(stylesDir, { withFileTypes: true });
+        for (const entry of styleFiles) {
+          if (entry.isFile() && /\.css$/i.test(entry.name)) {
+            discovered.add(path.join(stylesDir, entry.name));
+          }
+        }
+      } catch {
+        // ignore styles directory read failures
+      }
+    }
+  }
+
+  return [...discovered];
+}
+
+// ---------------------------------------------------------------------------
+// ShellPageParent route generation for live preview
+// ---------------------------------------------------------------------------
+
+function isShellPageParentEntry(sourceText: string): boolean {
+  return /\bShellPageParent\b/.test(sourceText)
+    && /\bextends\s+ShellPageParent\b/.test(sourceText);
+}
+
+function discoverPagesDirectory(filePath: string): string | undefined {
+  const entryDir = path.dirname(filePath);
+  const projectRoot = findNearestPackageRoot(filePath);
+
+  // Convention: look for pages/ relative to the entry file, then in src/pages, then project root/pages
   const candidates = [
-    path.join(exampleRoot, 'app.input.css'),
-    path.join(exampleRoot, 'app.css'),
-    path.join(exampleRoot, 'styles', 'app.input.css'),
-    path.join(exampleRoot, 'styles', 'app.css'),
-    path.join(exampleRoot, 'css', 'app.input.css'),
-    path.join(exampleRoot, 'css', 'app.css'),
+    path.join(entryDir, 'pages'),
+    path.join(projectRoot, 'src', 'pages'),
+    path.join(projectRoot, 'pages'),
   ];
 
-  return candidates.filter((candidate, index) => existsSync(candidate) && candidates.indexOf(candidate) === index);
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function toExportNameFromPageFile(fileName: string): string {
+  const base = fileName.replace(/\.(tsx|ts)$/i, '');
+  if (!base) return 'HomePage';
+  const pascal = base
+    .split(/[-_\s]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
+  return pascal.endsWith('Page') ? pascal : `${pascal}Page`;
+}
+
+function toRoutePathFromExportName(exportName: string): string {
+  const base = exportName.replace(/Page$/, '');
+  const kebab = base
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase();
+  if (kebab === 'home') return '/home';
+  return `/${kebab || 'home'}`;
+}
+
+async function buildInMemoryGeneratedLoadersModule(filePath: string, jsxImportSource: string): Promise<{ code: string; pagesFound: number } | null> {
+  const pagesDir = discoverPagesDirectory(filePath);
+  if (!pagesDir) return null;
+
+  const entries = await readdir(pagesDir, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && /\.(tsx|ts)$/i.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  if (files.length === 0) {
+    return null;
+  }
+
+  const projectRoot = findNearestPackageRoot(filePath);
+  const sourceRoot = path.join(projectRoot, 'src');
+  const importLines: string[] = [];
+  const loaderLines: string[] = [];
+  const routeLines: string[] = [];
+  const pagesLines: string[] = [];
+
+  files.forEach((pageFile, index) => {
+    const absPath = path.join(pagesDir, pageFile);
+    const relFromSrc = path.relative(sourceRoot, absPath).replace(/\\/g, '/').replace(/\.(tsx|ts)$/i, '');
+    const importPath = `src/${relFromSrc}`;
+    const exportName = toExportNameFromPageFile(pageFile);
+    const routePath = toRoutePathFromExportName(exportName);
+
+    importLines.push(`import * as M${index} from ${JSON.stringify(importPath)};`);
+    loaderLines.push(`if (M${index} && M${index}[${JSON.stringify(exportName)}]) {`);
+    loaderLines.push(`  __g.__nojsxComponentLoaders[${JSON.stringify(exportName)}] = (props) => new M${index}[${JSON.stringify(exportName)}](props);`);
+    loaderLines.push('}');
+    routeLines.push(`  ${JSON.stringify(routePath)}: { componentName: ${JSON.stringify(exportName)} },`);
+    pagesLines.push(`  ${JSON.stringify(exportName)}: ${JSON.stringify(routePath)},`);
+  });
+
+  const code = [
+    `import { nojsxComponentLoaders } from ${JSON.stringify(`${jsxImportSource}/core/global/registry`)};`,
+    ...importLines,
+    'const __g = globalThis;',
+    '__g.__nojsxComponentLoaders = __g.__nojsxComponentLoaders ?? nojsxComponentLoaders ?? {};',
+    ...loaderLines,
+    'export const nojsxPageRoutes = {',
+    ...routeLines,
+    '};',
+    '__g.__nojsxPageRoutes = nojsxPageRoutes;',
+    'export const nojsxPages = {',
+    ...pagesLines,
+    '};',
+    '__g.__nojsxPages = nojsxPages;',
+    '',
+  ].join('\n');
+
+  return { code, pagesFound: files.length };
+}
+
+function findLastImportEnd(source: string): number {
+  // Find the end position of the last top-level import statement
+  const importRegex = /^import\s.+?;[ \t]*$/gm;
+  let lastEnd = 0;
+  let match: RegExpExecArray | null;
+  while ((match = importRegex.exec(source)) !== null) {
+    lastEnd = match.index + match[0].length;
+  }
+  return lastEnd || 0;
 }
 
 async function loadRenderer(provider: ProviderInfo): Promise<(props: any) => string> {
@@ -434,7 +704,7 @@ async function buildCssForPreview(filePath: string, tempDir: string, provider: P
   const importedCssFiles = discoverImportedCssFiles(filePath, sourceText);
   const entryCssFiles = importedCssFiles.length > 0
     ? importedCssFiles
-    : discoverFallbackCssFiles(filePath);
+    : await discoverFallbackCssFiles(filePath);
 
   if (entryCssFiles.length === 0) {
     return '';
@@ -473,24 +743,18 @@ async function buildCssForPreview(filePath: string, tempDir: string, provider: P
 async function emitCompiledJs(filePath: string, sourceText: string, outDir: string): Promise<{ emittedJsPath: string; moduleMap: Record<string, string> }> {
   const tempOutDir = path.join(outDir, 'dist');
   mkdirSync(tempOutDir, { recursive: true });
-  const compileScriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'compile-tsx-preview.js');
-  const { stdout } = await runProcess(process.execPath, [
-    compileScriptPath,
-    JSON.stringify({
-      filePath,
-      sourceText,
-      outDir: tempOutDir,
-    }),
-  ], process.cwd());
-  const compileResult = JSON.parse(stdout.trim() || '{}') as { entryJsPath?: string; moduleMap?: Record<string, string> };
+  const artifactRoot = typeof (globalThis as any).__livePreview?.artifactRoot === 'string'
+    ? String((globalThis as any).__livePreview.artifactRoot)
+    : undefined;
+  const compileResult = await compilePreview({
+    filePath,
+    sourceText,
+    outDir: tempOutDir,
+    artifactRoot,
+  });
   const emittedJsPath = compileResult.entryJsPath;
   if (!emittedJsPath) {
     throw new Error(`[livePreview] Preview compile helper did not return an emitted JavaScript path for ${filePath}.`);
-  }
-
-  if (process.env.LIVE_PREVIEW_DEBUG_DUMP === 'true') {
-    const debugDumpPath = path.join(process.cwd(), 'tmp-live-preview-compile-result.json');
-    await writeFile(debugDumpPath, JSON.stringify(compileResult, null, 2), 'utf8');
   }
 
   return {
@@ -499,15 +763,33 @@ async function emitCompiledJs(filePath: string, sourceText: string, outDir: stri
   };
 }
 
-async function buildInlinePreviewHtml({ filePath, sourceText, tempDir }: { filePath: string; sourceText: string; tempDir: string }): Promise<string> {
+type CompiledPreviewArtifacts = {
+  emittedJsPath: string;
+  moduleMap: Record<string, string>;
+};
+
+function getPreviewShellRoutesVirtualModulePath(filePath: string): string {
+  return path.resolve(path.dirname(filePath), '__nojsx_preview_shell_routes.js').replace(/\\/g, '/');
+}
+
+async function buildInlinePreviewHtml({
+  filePath,
+  sourceText,
+  tempDir,
+  compiled,
+}: {
+  filePath: string;
+  sourceText: string;
+  tempDir: string;
+  compiled: CompiledPreviewArtifacts;
+}): Promise<string> {
   const provider = await resolveJsxProvider(filePath, sourceText);
   const renderShellPageParentDocument = await loadRenderer(provider);
   const httpPort = (globalThis as any).__livePreview?.httpPort as number | undefined;
-  const { emittedJsPath: compiledJsPath, moduleMap } = await emitCompiledJs(filePath, sourceText, tempDir);
   const entryModuleUrl = await materializeBrowserModuleGraph({
-    entryPath: compiledJsPath,
+    entryPath: compiled.emittedJsPath,
     httpPort,
-    moduleMap,
+    moduleMap: compiled.moduleMap,
     provider,
   });
   const autoMountEntryUrl = createDataModuleUrl(
@@ -523,6 +805,7 @@ async function buildInlinePreviewHtml({ filePath, sourceText, tempDir }: { fileP
     title: `${provider.jsxImportSource} TSX Preview`,
     importMap: {
       [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.jsxRuntime).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.jsxRuntime).href,
+      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.jsxDevRuntime).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.jsxDevRuntime).href,
       [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.components).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.components).href,
       [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.clientBootstrap).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.clientBootstrap).href,
     },
@@ -536,18 +819,35 @@ async function buildInlinePreviewHtml({ filePath, sourceText, tempDir }: { fileP
 }
 
 async function materializeBrowserModuleGraph({ entryPath, httpPort, moduleMap, provider }: { entryPath: string; httpPort?: number; moduleMap: Record<string, string>; provider: ProviderInfo }): Promise<string> {
-  const moduleSpecs = Object.entries(moduleMap || {});
-  const uniqueEmittedPaths = [...new Set(moduleSpecs.map(([, emittedPath]) => path.resolve(emittedPath).replace(/\\/g, '/')))];
+  const livePreviewState = (globalThis as any).__livePreview as { filePath?: string; sourceText?: string; jsxImportSource?: string } | undefined;
+  const pendingVirtualModuleSource = new Map<string, string>();
+  const injectedShellSpecifier = '__nojsx_preview_shell_routes';
+
+  if (livePreviewState?.filePath && livePreviewState?.sourceText && isShellPageParentEntry(livePreviewState.sourceText)) {
+    const virtualModule = await buildInMemoryGeneratedLoadersModule(livePreviewState.filePath, provider.jsxImportSource);
+    if (virtualModule) {
+      const virtualPath = getPreviewShellRoutesVirtualModulePath(livePreviewState.filePath);
+      pendingVirtualModuleSource.set(virtualPath, virtualModule.code);
+      moduleMap = {
+        ...moduleMap,
+        [injectedShellSpecifier]: virtualPath,
+      };
+    }
+  }
+
+  const normalizedModuleSpecs = Object.entries(moduleMap || {});
+  const normalizedUniqueEmittedPaths = [...new Set(normalizedModuleSpecs.map(([, emittedPath]) => path.resolve(emittedPath).replace(/\\/g, '/')))];
   const emittedPathToModuleUrl = new Map<string, string>();
   const pendingSourceByPath = new Map<string, string>();
 
-  for (const emittedPath of uniqueEmittedPaths) {
-    pendingSourceByPath.set(emittedPath, await readFile(emittedPath, 'utf8'));
+  for (const emittedPath of normalizedUniqueEmittedPaths) {
+    const virtualSource = pendingVirtualModuleSource.get(emittedPath);
+    pendingSourceByPath.set(emittedPath, virtualSource ?? await readFile(emittedPath, 'utf8'));
     emittedPathToModuleUrl.set(emittedPath, `__NOJSX_PENDING_MODULE_${emittedPathToModuleUrl.size}__`);
   }
 
   const specifierToModuleUrl: Record<string, string> = {};
-  for (const [specifier, emittedPath] of moduleSpecs) {
+  for (const [specifier, emittedPath] of normalizedModuleSpecs) {
     const normalizedEmittedPath = path.resolve(emittedPath).replace(/\\/g, '/');
     const moduleUrl = emittedPathToModuleUrl.get(normalizedEmittedPath);
     if (moduleUrl) {
@@ -559,11 +859,14 @@ async function materializeBrowserModuleGraph({ entryPath, httpPort, moduleMap, p
   const normalizedEntryPath = path.resolve(entryPath).replace(/\\/g, '/');
   while (!stabilized) {
     stabilized = true;
-    for (const emittedPath of uniqueEmittedPaths) {
+    for (const emittedPath of normalizedUniqueEmittedPaths) {
       const isEntryModule = emittedPath === normalizedEntryPath;
       let rewrittenSource = stripSourceMapComment(pendingSourceByPath.get(emittedPath) || '');
       if (!isEntryModule) {
         rewrittenSource = stripPreviewBootstrap(rewrittenSource);
+      }
+      if (isEntryModule && pendingVirtualModuleSource.size > 0) {
+        rewrittenSource = `${rewrittenSource}\nimport ${JSON.stringify(injectedShellSpecifier)};\n`;
       }
       let rewritten = rewriteProviderImportsForBrowser(rewrittenSource, httpPort, provider);
       rewritten = rewriteStaticRelativeImportsWithMap(rewritten, emittedPath, emittedPathToModuleUrl);
@@ -576,7 +879,7 @@ async function materializeBrowserModuleGraph({ entryPath, httpPort, moduleMap, p
       }
     }
 
-    for (const [specifier, emittedPath] of moduleSpecs) {
+    for (const [specifier, emittedPath] of normalizedModuleSpecs) {
       const normalizedEmittedPath = path.resolve(emittedPath).replace(/\\/g, '/');
       const moduleUrl = emittedPathToModuleUrl.get(normalizedEmittedPath);
       if (moduleUrl) {
@@ -594,6 +897,21 @@ async function materializeBrowserModuleGraph({ entryPath, httpPort, moduleMap, p
 }
 
 async function materializePreviewModuleGraph({ entryPath, provider, outDir, moduleMap }: { entryPath: string; provider: ProviderInfo; outDir: string; moduleMap: Record<string, string> }): Promise<string> {
+  const livePreviewState = (globalThis as any).__livePreview as { filePath?: string; sourceText?: string } | undefined;
+  const virtualModuleSourceByPath = new Map<string, string>();
+  const injectedShellSpecifier = '__nojsx_preview_shell_routes';
+  if (livePreviewState?.filePath && livePreviewState?.sourceText && isShellPageParentEntry(livePreviewState.sourceText)) {
+    const virtualModule = await buildInMemoryGeneratedLoadersModule(livePreviewState.filePath, provider.jsxImportSource);
+    if (virtualModule) {
+      const virtualPath = getPreviewShellRoutesVirtualModulePath(livePreviewState.filePath);
+      virtualModuleSourceByPath.set(virtualPath, virtualModule.code);
+      moduleMap = {
+        ...moduleMap,
+        [injectedShellSpecifier]: virtualPath,
+      };
+    }
+  }
+
   const moduleSpecs = Object.entries(moduleMap || {});
   const uniqueEmittedPaths = [...new Set(moduleSpecs.map(([, emittedPath]) => path.resolve(emittedPath).replace(/\\/g, '/')))];
   const emittedPathToModulePath = new Map<string, string>();
@@ -616,11 +934,14 @@ async function materializePreviewModuleGraph({ entryPath, provider, outDir, modu
 
   const normalizedEntryPath = path.resolve(entryPath).replace(/\\/g, '/');
   for (const emittedPath of uniqueEmittedPaths) {
-    const source = await readFile(emittedPath, 'utf8');
+    const source = virtualModuleSourceByPath.get(emittedPath) ?? await readFile(emittedPath, 'utf8');
     const isEntryModule = emittedPath === normalizedEntryPath;
     let rewrittenSource = stripSourceMapComment(source);
     if (!isEntryModule) {
       rewrittenSource = stripPreviewBootstrap(rewrittenSource);
+    }
+    if (isEntryModule && virtualModuleSourceByPath.size > 0) {
+      rewrittenSource = `${rewrittenSource}\nimport ${JSON.stringify(injectedShellSpecifier)};\n`;
     }
     let rewritten = rewriteProviderImportsForNode(rewrittenSource, provider);
     rewritten = rewriteStaticRelativeImportsWithMap(rewritten, emittedPath, emittedPathToModuleUrl);
@@ -631,15 +952,6 @@ async function materializePreviewModuleGraph({ entryPath, provider, outDir, modu
       throw new Error(`[livePreview] Failed to allocate materialized path for ${emittedPath}.`);
     }
     await writeFile(materializedModulePath, rewritten, 'utf8');
-    if (process.env.LIVE_PREVIEW_DEBUG_DUMP === 'true' && isEntryModule) {
-      const debugDumpPath = path.join(process.cwd(), 'tmp-live-preview-generated-module.mjs');
-      await writeFile(debugDumpPath, rewritten, 'utf8');
-    }
-  }
-
-  if (process.env.LIVE_PREVIEW_DEBUG_DUMP === 'true') {
-    const debugGraphPath = path.join(process.cwd(), 'tmp-live-preview-materialized-graph.json');
-    await writeFile(debugGraphPath, JSON.stringify(Object.fromEntries([...emittedPathToModulePath.entries()].map(([emittedPath, modulePath]) => [emittedPath, modulePath])), null, 2), 'utf8');
   }
 
   const entryModulePath = emittedPathToModulePath.get(normalizedEntryPath);
@@ -679,13 +991,22 @@ function createContractBootstrap(moduleUrl: string): string {
 }
 
 async function compileTsxToModule(filePath: string, sourceText: string, outDir: string): Promise<string> {
+  const compiled = await emitCompiledJs(filePath, sourceText, outDir);
+  return compileEmittedPreviewToModule(filePath, sourceText, outDir, compiled);
+}
+
+async function compileEmittedPreviewToModule(
+  filePath: string,
+  sourceText: string,
+  outDir: string,
+  compiled: CompiledPreviewArtifacts,
+): Promise<string> {
   const provider = await resolveJsxProvider(filePath, sourceText);
-  const { emittedJsPath: emittedPath, moduleMap } = await emitCompiledJs(filePath, sourceText, outDir);
   const entryModulePath = await materializePreviewModuleGraph({
-    entryPath: emittedPath,
+    entryPath: compiled.emittedJsPath,
     provider,
     outDir,
-    moduleMap,
+    moduleMap: compiled.moduleMap,
   });
   const bootstrapModulePath = path.join(outDir, `${randomUUID()}.entry.mjs`);
   const bootstrapSource = rewriteProviderImportsForNode(
@@ -698,7 +1019,7 @@ async function compileTsxToModule(filePath: string, sourceText: string, outDir: 
 
 export async function renderLivePreview(payload: unknown): Promise<string> {
   const filePath = typeof (payload as any)?.filePath === 'string' ? (payload as any).filePath : '';
-  const sourceText = (() => {
+  const rawSourceText = (() => {
     if (typeof (payload as any)?.sourceText === 'string') {
       return (payload as any).sourceText;
     }
@@ -710,6 +1031,9 @@ export async function renderLivePreview(payload: unknown): Promise<string> {
     }
     return '';
   })();
+
+  const sourceText = rawSourceText;
+
   const artifactRoot = typeof (payload as any)?.artifactRoot === 'string' && (payload as any).artifactRoot.trim()
     ? (payload as any).artifactRoot
     : path.join(os.tmpdir(), 'nojsx-live-preview', 'shared');
@@ -722,14 +1046,17 @@ export async function renderLivePreview(payload: unknown): Promise<string> {
   const tempDir = await mkdtemp(path.join(tempBase, 'live-preview-contract-'));
   const projectRoot = findNearestPackageRoot(filePath);
   const provider = await resolveJsxProvider(filePath, sourceText);
+  const previewSourceText = sourceText;
   const outputPath = path.join(tempDir, 'live-preview-output.html');
 
   (globalThis as any).__livePreview = {
     filePath,
-    sourceText,
+    sourceText: previewSourceText,
     httpPort,
     workingDirectory: projectRoot,
     projectRoot,
+    requestPath: typeof (payload as any)?.requestPath === 'string' ? (payload as any).requestPath : undefined,
+    appHostId: 'info',
     jsxImportSource: provider.jsxImportSource,
     jsxRuntimeSpecifier: `${provider.jsxImportSource}/jsx-runtime`,
     tempDir,
@@ -738,8 +1065,9 @@ export async function renderLivePreview(payload: unknown): Promise<string> {
   };
 
   try {
-    const html = await buildInlinePreviewHtml({ filePath, sourceText, tempDir });
-    const compiledPath = await compileTsxToModule(filePath, sourceText, tempDir);
+    const compiled = await emitCompiledJs(filePath, previewSourceText, tempDir);
+    const html = await buildInlinePreviewHtml({ filePath, sourceText: previewSourceText, tempDir, compiled });
+    const compiledPath = await compileEmittedPreviewToModule(filePath, previewSourceText, tempDir, compiled);
 
     const runnerPath = path.join(tempDir, `${randomUUID()}.runner.mjs`);
     const moduleUrl = pathToFileURL(compiledPath).href + `?t=${Date.now()}`;
@@ -747,10 +1075,12 @@ export async function renderLivePreview(payload: unknown): Promise<string> {
     await writeFile(runnerPath, [
       `globalThis.__livePreview = ${JSON.stringify({
         filePath,
-        sourceText,
+        sourceText: previewSourceText,
         httpPort,
         workingDirectory: projectRoot,
         projectRoot,
+        requestPath: typeof (payload as any)?.requestPath === 'string' ? (payload as any).requestPath : undefined,
+        appHostId: 'info',
         jsxImportSource: (globalThis as any).__livePreview.jsxImportSource,
         jsxRuntimeSpecifier: (globalThis as any).__livePreview.jsxRuntimeSpecifier,
         tempDir,
@@ -769,7 +1099,8 @@ export async function renderLivePreview(payload: unknown): Promise<string> {
     }
 
     if (existsSync(outputPath)) {
-      return await readFile(outputPath, 'utf8');
+      const htmlFromOutput = await readFile(outputPath, 'utf8');
+      return htmlFromOutput;
     }
 
     return '';
@@ -824,3 +1155,4 @@ if (isDirectCliInvocation) {
     process.exit(1);
   });
 }
+

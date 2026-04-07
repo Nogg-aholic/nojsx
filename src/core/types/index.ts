@@ -130,7 +130,6 @@ declare global {
     __nojsxSlotCaptureStack?: __nojsxSlotCaptureToken[];
     __nojsxSlotCaptureData?: Map<number, Record<string, string>>;
     __nojsxDebugSlots?: boolean;
-    __nojsxDebugPreserveChildren?: boolean;
 
     __nojsxInsideIntrinsic?: string;
 
@@ -163,6 +162,7 @@ declare global {
       sourceText?: string;
       workingDirectory?: string;
       projectRoot?: string;
+      requestPath?: string;
       tempDir?: string;
       outputPath?: string;
       httpPort?: number;

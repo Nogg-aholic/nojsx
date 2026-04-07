@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@source "../**/*.{ts,tsx}";
+
+/* -- Design tokens -- */
+:root {
+  --color-sand: #faf6f1;
+  --color-terracotta: #c2410c;
+  --color-amber-glow: #f59e0b;
+}
+
+/* -- Base -- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family:
+    "DM Sans", "Helvetica Neue", Arial, sans-serif;
+  color: #292524;
+  background:
+    radial-gradient(ellipse 70% 50% at 20% 0%, rgba(251, 191, 36, 0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(249, 115, 22, 0.10) 0%, transparent 50%),
+    linear-gradient(175deg, var(--color-sand) 0%, #f5f0ea 100%);
+}
+
+/* -- Nav link utility -- */
+.nav-link {
+  display: inline-block;
+  padding: 0.375rem 0.875rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #57534e;
+  transition: color 0.15s, background-color 0.15s;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.nav-link:hover {
+  color: #c2410c;
+  background-color: rgba(251, 191, 36, 0.1);
+}
+
+/* -- Page enter animation -- */
+@keyframes page-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.page-enter {
+  animation: page-fade-up 0.35s ease-out both;
+}

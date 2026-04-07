@@ -1,17 +1,19 @@
 {
 	"name": "nojsx",
-	"version": "1.0.5",
+	"version": "1.0.6",
 	"type": "module",
 	"scripts": {
 		"clean:dist": "bun scripts/clean-dist.ts",
 		"build": "bun run clean:dist && bunx tsc -p tsconfig.json && bunx tsc -p tsconfig.scripts.json && bun scripts/assert-dist-relative-import-extensions.ts && bun scripts/mirror-dist-to-root.ts",
 		"compile": "bun run build",
 		"pack:tgz": "bun run build && bun scripts/pack-tgz.ts",
+		"refresh:examples": "bun scripts/refresh-examples.ts",
 		"example:minimal": "npm --prefix ./examples/nojsx-minimal install && npm --prefix ./examples/nojsx-minimal run build",
 		"test:tgz:minimal": "bun run pack:tgz && npm --prefix ./examples/nojsx-minimal install && npm --prefix ./examples/nojsx-minimal run build"
 	},
 	"bin": {
-		"nojsx-build-css": "./dist/scripts/build-tailwind.js"
+		"nojsx-build-css": "./dist/scripts/build-tailwind.js",
+		"nojsx-generate-component-loaders": "./dist/scripts/generate-component-loaders.js"
 	},
 	"main": "./dist/jsx-runtime.js",
 	"types": "./dist/jsx-runtime.d.ts",

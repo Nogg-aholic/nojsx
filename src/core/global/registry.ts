@@ -76,9 +76,6 @@ export class nojsxRegistry {
         this.registry.delete(id);
     }
 
-    private shouldDebugPreserve(componentIds: Array<string | null | undefined> = []): boolean {
-        return !!(globalThis as any).__nojsxDebugPreserveChildren && shouldLogPreserveForAny(componentIds);
-    }
     private consumePreservedSubtree(top: { all: Set<string>; direct: string[] }, rootId: string): void {
         if (!rootId) return;
         top.all.delete(rootId);
@@ -112,24 +109,10 @@ export class nojsxRegistry {
 
     beginPreserveChildren(ids: string[], directChildIds: string[] = []): void {
         this.preserveChildrenStack.push({ all: new Set(ids), direct: [...directChildIds] });
-        if (this.shouldDebugPreserve([...directChildIds, ...ids])) {
-            console.log('[nojsx:preserve] begin', {
-                depth: this.preserveChildrenStack.length,
-                directChildIds,
-                descendants: ids,
-            });
-        }
     }
 
     endPreserveChildren(): void {
         const top = this.preserveChildrenStack[this.preserveChildrenStack.length - 1];
-        if (this.shouldDebugPreserve(top ? [...top.direct, ...Array.from(top.all)] : [])) {
-            console.log('[nojsx:preserve] end', {
-                depth: this.preserveChildrenStack.length,
-                remainingDirect: top ? [...top.direct] : [],
-                remainingAll: top ? Array.from(top.all) : [],
-            });
-        }
         if (top) {
             for (const staleId of top.all) {
                 this.deleteEntry(staleId);
@@ -153,48 +136,29 @@ export class nojsxRegistry {
         if (!top) return null;
 
         const base = `${parentId}.${componentName}`;
-        if (this.shouldDebugPreserve([parentId, ...top.direct])) {
-            console.log('[nojsx:preserve] consume-attempt', {
-                parentId,
-                componentName,
-                explicitKey,
-                directPool: [...top.direct],
-            });
-        }
         if (explicitKey !== undefined && explicitKey !== null && explicitKey !== '') {
             const keyed = `${base}:${String(explicitKey)}`;
             const keyedIdx = top.direct.indexOf(keyed);
             if (keyedIdx !== -1) {
                 top.direct.splice(keyedIdx, 1);
                 this.consumePreservedSubtree(top, keyed);
-                if (this.shouldDebugPreserve([keyed])) {
-                    console.log('[nojsx:preserve] consume-hit-keyed', { reusedId: keyed });
-                }
                 return keyed;
             }
+
+            // An explicit key requests a specific preserved sibling instance.
+            // Falling back to any same-name sibling breaks keyed identity across rerenders.
+            return null;
         }
 
         const directPattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}(?::[^.]+|#[^.]+)?$`);
         const matchIdx = top.direct.findIndex((id) => directPattern.test(id));
         if (matchIdx === -1) {
-            if (this.shouldDebugPreserve([parentId, ...top.direct])) {
-                console.log('[nojsx:preserve] consume-miss', {
-                    parentId,
-                    componentName,
-                    explicitKey,
-                    pattern: directPattern.source,
-                    directPool: [...top.direct],
-                });
-            }
             return null;
         }
 
         const id = top.direct[matchIdx];
         top.direct.splice(matchIdx, 1);
         this.consumePreservedSubtree(top, id);
-        if (this.shouldDebugPreserve([id])) {
-            console.log('[nojsx:preserve] consume-hit-pattern', { reusedId: id });
-        }
         return id;
     }
 
@@ -202,14 +166,6 @@ export class nojsxRegistry {
         return this.preserveChildrenStack.length > 0;
     }
 
-    getPreserveDebugSnapshot(): { depth: number; direct: string[]; all: string[] } {
-        const top = this.preserveChildrenStack[this.preserveChildrenStack.length - 1];
-        return {
-            depth: this.preserveChildrenStack.length,
-            direct: top ? [...top.direct] : [],
-            all: top ? Array.from(top.all) : [],
-        };
-    }
 
     get(id: string): nojsxContext {
         if (!this.registry.has(id) || this.registry.get(id) === undefined) {
@@ -268,6 +224,11 @@ export class nojsxRegistry {
                 if (reservedInstanceKeys.has(key)) continue;
                 preservedRecord[key] = nextRecord[key];
             }
+
+			// Refresh non-enumerable/private construction state needed by rerendered children.
+			preservedRecord.parent = nextRecord.parent;
+			preservedRecord.__props = nextRecord.__props;
+			preservedRecord.nContext = nextRecord.nContext;
         }
 
         // Update the registry entry metadata in-place.
