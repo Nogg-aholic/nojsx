@@ -304,6 +304,10 @@ function rewriteProviderImportsForNode(source: string, provider: ProviderInfo): 
 
 function rewriteProviderImportsForBrowser(source: string, httpPort: number | undefined, provider: ProviderInfo): string {
   const prefix = `${provider.jsxImportSource}/`;
+  const requestPath = String((globalThis as any).__livePreview?.requestPath || '');
+  const requestDir = requestPath
+    ? path.posix.dirname(requestPath.replace(/\\/g, '/'))
+    : '';
   const rewriteSpecifier = (specifier: string): string => {
     if (!specifier.startsWith(prefix)) {
       return specifier;
@@ -317,7 +321,10 @@ function rewriteProviderImportsForBrowser(source: string, httpPort: number | und
     const browserPath = providerSubpath
       ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
       : `node_modules/${provider.jsxImportSource}`;
-    return `http://127.0.0.1:${httpPort}/${browserPath}`;
+    const requestRelativePath = requestDir && requestDir !== '.'
+      ? path.posix.join(requestDir, browserPath)
+      : browserPath;
+    return `http://127.0.0.1:${httpPort}/${requestRelativePath.replace(/^\/+/, '')}`;
   };
 
   return source
@@ -881,10 +888,10 @@ async function buildInlinePreviewHtml({
   return renderShellPageParentDocument({
     title: shellLayout?.title || `${provider.jsxImportSource} TSX Preview`,
     importMap: {
-      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/jsx-runtime.js` : pathToFileURL(provider.resolved.jsxRuntime).href,
-      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/jsx-dev-runtime.js` : pathToFileURL(provider.resolved.jsxDevRuntime).href,
-      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/core/components/components.js` : pathToFileURL(provider.resolved.components).href,
-      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/core/util/client-bootstrap.js` : pathToFileURL(provider.resolved.clientBootstrap).href,
+      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.jsxRuntime).href : pathToFileURL(provider.resolved.jsxRuntime).href,
+      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-dev-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-dev-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.jsxDevRuntime).href : pathToFileURL(provider.resolved.jsxDevRuntime).href,
+      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/components/components`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/components/components`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.components).href : pathToFileURL(provider.resolved.components).href,
+      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/util/client-bootstrap`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/util/client-bootstrap`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.clientBootstrap).href : pathToFileURL(provider.resolved.clientBootstrap).href,
     },
     shellSrc: '',
     shellScriptHtml: `<script type="module">\nimport ${JSON.stringify(autoMountEntryUrl)};\n</script>`,
