@@ -312,10 +312,18 @@ function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined
     throw new Error('[livePreview] httpPort is required to build browser preview modules.');
   }
 
-  const requestPath = String((globalThis as any).__livePreview?.requestPath || '');
-  const requestDir = requestPath
-    ? path.posix.dirname(requestPath.replace(/\\/g, '/'))
+  const livePreview = (globalThis as any).__livePreview as { filePath?: string; projectRoot?: string; requestPath?: string } | undefined;
+  const filePath = typeof livePreview?.filePath === 'string' ? livePreview.filePath : '';
+  const projectRoot = typeof livePreview?.projectRoot === 'string' ? livePreview.projectRoot : provider.projectRoot;
+  const projectRelativeDir = filePath && projectRoot
+    ? path.posix.dirname(path.relative(projectRoot, filePath).replace(/\\/g, '/'))
     : '';
+  const requestPath = typeof livePreview?.requestPath === 'string'
+    ? livePreview.requestPath.replace(/\\/g, '/')
+    : '';
+  const requestDir = projectRelativeDir && projectRelativeDir !== '.'
+    ? projectRelativeDir
+    : (requestPath ? path.posix.dirname(requestPath) : '');
   const providerSubpath = specifier.slice(prefix.length);
   const browserPath = providerSubpath
     ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
