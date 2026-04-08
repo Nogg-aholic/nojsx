@@ -4,7 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"clean:dist": "bun scripts/clean-dist.ts",
-		"build": "bun run clean:dist && bunx tsc -p tsconfig.json && bun scripts/copy-src-dts-to-dist.ts && bunx tsc -p tsconfig.scripts.json && bun scripts/assert-dist-relative-import-extensions.ts && bun scripts/mirror-dist-to-root.ts",
+		"build": "bun run clean:dist && bunx tsc -p tsconfig.json && bun scripts/copy-src-dts-to-dist.ts && bunx tsc -p tsconfig.scripts.json && bun scripts/assert-dist-relative-import-extensions.ts",
 		"compile": "bun run pack:tgz",
 		"pack:tgz": "bun run clean:dist && bun run build && bun scripts/pack-tgz.ts",
 		"refresh:examples": "bun scripts/refresh-examples.ts",
