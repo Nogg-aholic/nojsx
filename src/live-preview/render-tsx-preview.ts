@@ -302,29 +302,37 @@ function rewriteProviderImportsForNode(source: string, provider: ProviderInfo): 
     .replace(/(import\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => `${start}${rewriteSpecifier(specifier)}${end}`);
 }
 
-function rewriteProviderImportsForBrowser(source: string, httpPort: number | undefined, provider: ProviderInfo): string {
+function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined, provider: ProviderInfo): string {
   const prefix = `${provider.jsxImportSource}/`;
+  if (!specifier.startsWith(prefix)) {
+    return specifier;
+  }
+
+  if (!(typeof httpPort === 'number' && Number.isFinite(httpPort))) {
+    throw new Error('[livePreview] httpPort is required to build browser preview modules.');
+  }
+
   const requestPath = String((globalThis as any).__livePreview?.requestPath || '');
   const requestDir = requestPath
     ? path.posix.dirname(requestPath.replace(/\\/g, '/'))
     : '';
+  const providerSubpath = specifier.slice(prefix.length);
+  const browserPath = providerSubpath
+    ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
+    : `node_modules/${provider.jsxImportSource}`;
+  const requestRelativePath = requestDir && requestDir !== '.'
+    ? path.posix.join(requestDir, browserPath)
+    : browserPath;
+  return `http://127.0.0.1:${httpPort}/${requestRelativePath.replace(/^\/+/, '')}`;
+}
+
+function rewriteProviderImportsForBrowser(source: string, httpPort: number | undefined, provider: ProviderInfo): string {
+  const prefix = `${provider.jsxImportSource}/`;
   const rewriteSpecifier = (specifier: string): string => {
     if (!specifier.startsWith(prefix)) {
       return specifier;
     }
-
-    if (!(typeof httpPort === 'number' && Number.isFinite(httpPort))) {
-      throw new Error('[livePreview] httpPort is required to build browser preview modules.');
-    }
-
-    const providerSubpath = specifier.slice(prefix.length);
-    const browserPath = providerSubpath
-      ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
-      : `node_modules/${provider.jsxImportSource}`;
-    const requestRelativePath = requestDir && requestDir !== '.'
-      ? path.posix.join(requestDir, browserPath)
-      : browserPath;
-    return `http://127.0.0.1:${httpPort}/${requestRelativePath.replace(/^\/+/, '')}`;
+    return buildProviderBrowserUrl(specifier, httpPort, provider);
   };
 
   return source
@@ -888,10 +896,10 @@ async function buildInlinePreviewHtml({
   return renderShellPageParentDocument({
     title: shellLayout?.title || `${provider.jsxImportSource} TSX Preview`,
     importMap: {
-      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.jsxRuntime).href : pathToFileURL(provider.resolved.jsxRuntime).href,
-      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-dev-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/jsx-dev-runtime`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.jsxDevRuntime).href : pathToFileURL(provider.resolved.jsxDevRuntime).href,
-      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/components/components`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/components/components`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.components).href : pathToFileURL(provider.resolved.components).href,
-      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/util/client-bootstrap`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[1] || rewriteProviderImportsForBrowser(`import ${JSON.stringify(`${provider.jsxImportSource}/core/util/client-bootstrap`)};`, httpPort, provider).match(/"([^"]+)"|\'([^\']+)\'/)?.[2] || pathToFileURL(provider.resolved.clientBootstrap).href : pathToFileURL(provider.resolved.clientBootstrap).href,
+      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxRuntime).href,
+      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-dev-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxDevRuntime).href,
+      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/core/components/components`, httpPort, provider) : pathToFileURL(provider.resolved.components).href,
+      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/core/util/client-bootstrap`, httpPort, provider) : pathToFileURL(provider.resolved.clientBootstrap).href,
     },
     shellSrc: '',
     shellScriptHtml: `<script type="module">\nimport ${JSON.stringify(autoMountEntryUrl)};\n</script>`,
