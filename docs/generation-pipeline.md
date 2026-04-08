@@ -23,9 +23,8 @@ It does not currently build:
 
 The `scripts/` directory now contains only the scripts still required by the package:
 
-- `clean-dist.ts`: clears `dist/` and the mirrored root `../dist/` before each build.
+- `clean-dist.ts`: clears `dist/` before each build.
 - `build-tailwind.ts`: thin wrapper around the Tailwind CLI.
-- `mirror-dist-to-root.ts`: mirrors built output to the repository-level `../dist/` folder.
 - `assert-dist-relative-import-extensions.ts`: asserts emitted `dist` JS has explicit extensions on relative imports.
 - `pack-tgz.ts`: runs package packing flow and writes a stable `nojsx.tgz` at repo root.
 
@@ -39,7 +38,6 @@ The TSX live preview runtime now lives under `src/live-preview/` as TypeScript a
 2. TypeScript compile for the library.
 3. TypeScript compile for the remaining scripts.
 4. Assert emitted relative imports in `dist` use explicit extensions.
-5. Mirror the resulting build to the repository-level `../dist/` folder.
 
 This is now the full package build. There is no `regen` phase anymore.
 
