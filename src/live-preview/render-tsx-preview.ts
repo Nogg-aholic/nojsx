@@ -368,8 +368,11 @@ function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined
   const browserPath = providerSubpath
     ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
     : `node_modules/${provider.jsxImportSource}`;
-  const requestRelativePath = packageRequestDir && packageRequestDir !== '.'
-    ? path.posix.join(packageRequestDir, browserPath)
+  const normalizedBase = packageRequestDir && packageRequestDir !== '.'
+    ? packageRequestDir.replace(/\/+$/, '')
+    : '';
+  const requestRelativePath = normalizedBase
+    ? `${normalizedBase}/${browserPath}`
     : browserPath;
   return `http://127.0.0.1:${httpPort}/${requestRelativePath.replace(/^\/+/, '')}`;
 }
