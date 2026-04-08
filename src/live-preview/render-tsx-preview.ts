@@ -769,19 +769,32 @@ async function buildCssForPreview(filePath: string, tempDir: string, provider: P
   const sourceArg = path.relative(providerPackageRoot, exampleRoot).replace(/\\/g, '/');
   const cssParts: string[] = [];
 
+  const isMissingOptionalTailwindDependency = (error: unknown): boolean => {
+    const message = String((error as any)?.stack || (error as any)?.message || error || '');
+    return /Cannot find module ['"]@parcel\/watcher['"]/i.test(message);
+  };
+
   for (let i = 0; i < entryCssFiles.length; i++) {
     const entryCssPath = entryCssFiles[i];
     const entryOutputPath = entryCssFiles.length === 1
       ? cssOutputPath
       : path.join(tempDir, `preview-${i}.css`);
 
-    await runProcess('bun', [
-      cliScript,
-      '--input', path.relative(providerPackageRoot, entryCssPath).replace(/\\/g, '/'),
-      '--output', path.relative(providerPackageRoot, entryOutputPath).replace(/\\/g, '/'),
-      '--source', sourceArg,
-      '--no-minify',
-    ], providerPackageRoot);
+    try {
+      await runProcess('bun', [
+        cliScript,
+        '--input', path.relative(providerPackageRoot, entryCssPath).replace(/\\/g, '/'),
+        '--output', path.relative(providerPackageRoot, entryOutputPath).replace(/\\/g, '/'),
+        '--source', sourceArg,
+        '--no-minify',
+      ], providerPackageRoot);
+    } catch (error) {
+      if (isMissingOptionalTailwindDependency(error)) {
+        console.warn('[livePreview] Skipping preview CSS build because @parcel/watcher is not installed in the consumer package manager layout.');
+        return '';
+      }
+      throw error;
+    }
 
     cssParts.push(await readFile(entryOutputPath, 'utf8'));
   }
