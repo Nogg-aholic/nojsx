@@ -15,5 +15,5 @@
     "skipLibCheck": true,
     "sourceMap": true
   },
-  "include": ["src/*.tsx", "src/*.ts", "src/**/*.tsx", "src/**/*.ts", "src/**/*.css"]
+  "include": ["src/*.tsx", "src/*.ts", "src/**/*.tsx", "src/**/*.ts", "src/**/*.css", "script/*.ts"]
 }

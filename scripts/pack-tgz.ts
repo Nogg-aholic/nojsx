@@ -3,7 +3,6 @@
 import { existsSync } from 'node:fs';
 import { rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-
 type PackageJson = {
   name: string;
   version: string;

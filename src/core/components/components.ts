@@ -35,7 +35,7 @@ export function wrapHtmlWithRenderContext(fn: () => string): (componentId: strin
  * @remarks
  * `__id`/`key`/`__key` are used to build stable component instance ids.
  */
-export interface NComponentProps {
+export interface NComponentProps extends JSX.HtmlTag {
 	class?: string;
 	__id?: string;
 	key?: string | number;
@@ -123,7 +123,7 @@ export abstract class NComponent {
 			componentRegistry.setRenderParent(this.id);
 			componentRegistry.beginPreserveChildren(descendantIds, directChildIds);
 			componentRegistry.prepareChildRender(this.id, currentEntry);
-			const html = this.__renderHtml(this.id, this.__props?.class);
+			const html = this.__renderHtml(this.id, this.props?.class);
 			el.outerHTML = html;
 		} finally {
 			componentRegistry.endPreserveChildren();
@@ -131,7 +131,9 @@ export abstract class NComponent {
 		}
 
 		for (const [childId, preservedEl] of preservedChildElements.entries()) {
-			if (!componentRegistry.has(childId)) continue;
+			if (!componentRegistry.has(childId)) {
+				throw new Error("DEBUG THIS")
+			};
 			const placeholder = document.querySelector(`[data-component-id="${childId}"]`);
 			if (!placeholder || !placeholder.parentNode) continue;
 			placeholder.parentNode.replaceChild(preservedEl, placeholder);
@@ -158,7 +160,7 @@ export abstract class NComponent {
 	};
 
 	// Captured construction props for rendering (used by injected render())
-	private __props?: NComponentProps;
+	public props?: NComponentProps;
 	private __didLoad = false;
 
 	private __runOnLoadOnce(): void {
@@ -203,7 +205,7 @@ export abstract class NComponent {
 		const ctx: nContext = { name: name, id: componentId, key: instanceKey };
 		this.id = componentId;
 		this.nContext = ctx;
-		this.__props = props;
+		this.props = props;
 		this.parent = componentRegistry.getRenderParent() ? componentRegistry.get(componentRegistry.getRenderParent())?.result : null;
 		this.children = [];
 		this.getShell = createGetShellFunctionServer();
@@ -213,7 +215,7 @@ export abstract class NComponent {
 	// Placeholder HTML used during initial client construction.
 	__html(): string {
 		this.__runOnLoadOnce();
-		return this.__renderHtml(this.id, this.__props?.class);
+		return this.__renderHtml(this.id, this.props?.class);
 	}
 }
 
@@ -260,7 +262,7 @@ function register(instance: NComponent, nContext: nContext) {
 		const parentAfter = parentId ? (componentRegistry.has(parentId) ? componentRegistry.get(parentId) : undefined) : undefined;
 		// Add this component to parent's children array
 		if (parentAfter?.result) {
-			const parentInstance = parentAfter.result as any;
+			const parentInstance = parentAfter.result;
 			parentInstance.children = parentInstance.children ?? [];
 			parentInstance.children.push(instance);
 		}

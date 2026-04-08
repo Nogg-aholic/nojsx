@@ -1,9 +1,11 @@
 import path from 'node:path';
+import os from 'node:os';
 import process from 'node:process';
 import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import { discoverPageSourceFiles, discoverPagesDirectory } from './shell-page-shared.js';
 
 type PreviewCompilerCacheEntry = {
   key: string;
@@ -21,6 +23,22 @@ type PreviewCompilerCacheEntry = {
 };
 
 const previewCompilerCache = new Map<string, PreviewCompilerCacheEntry>();
+
+function normalizeServerSessionId(value: unknown): string {
+  if (typeof value !== 'string') {
+    return 'default';
+  }
+
+  const trimmed = value.trim();
+  return trimmed || 'default';
+}
+
+function toPathSegment(value: string): string {
+  return value
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'default';
+}
 
 function readJsxImportSourcePragma(sourceText: string): string | undefined {
   const match = sourceText.match(/@jsxImportSource\s+([^\s*]+)/);
@@ -89,26 +107,8 @@ function isShellPageParentEntry(sourceText: string): boolean {
     && /\bextends\s+ShellPageParent\b/.test(sourceText);
 }
 
-function discoverPagesDirectory(filePath: string): string | undefined {
-  const entryDir = path.dirname(filePath);
-  const projectRoot = findNearestPackageRoot(filePath);
-  const candidates = [
-    path.join(entryDir, 'pages'),
-    path.join(projectRoot, 'src', 'pages'),
-    path.join(projectRoot, 'pages'),
-  ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-}
-
 async function addDiscoveredPageModuleEntries(moduleMap: Record<string, string>, filePath: string, tempEmitRoot: string, sourceRootPath: string, baseUrlPath: string): Promise<void> {
-  const pagesDir = discoverPagesDirectory(filePath);
+  const pagesDir = discoverPagesDirectory(filePath, findNearestPackageRoot);
   if (!pagesDir) {
     return;
   }
@@ -136,29 +136,19 @@ async function addDiscoveredPageModuleEntries(moduleMap: Record<string, string>,
   }
 }
 
-async function discoverPageSourceFiles(filePath: string): Promise<string[]> {
-  const pagesDir = discoverPagesDirectory(filePath);
-  if (!pagesDir) {
-    return [];
-  }
-
-  const entries = await readdir(pagesDir, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && /\.(ts|tsx)$/i.test(entry.name))
-    .map((entry) => path.resolve(path.join(pagesDir, entry.name)));
-}
-
-function createCompilerCacheKey(filePath: string, tsconfigPath: string | undefined, outDir: string, jsxImportSource: string): string {
+function createCompilerCacheKey(filePath: string, tsconfigPath: string | undefined, jsxImportSource: string, serverSessionId: string): string {
   return [
     path.resolve(tsconfigPath || findNearestPackageRoot(filePath)).replace(/\\/g, '/'),
     jsxImportSource,
+    serverSessionId,
   ].join('|');
 }
 
-function getStableEmitRoot(artifactRoot: string, filePath: string): string {
+function getStableEmitRoot(artifactRoot: string, filePath: string, serverSessionId: string): string {
   const projectRoot = findNearestPackageRoot(filePath);
   const projectName = path.basename(projectRoot).replace(/[^a-zA-Z0-9._-]+/g, '_') || 'project';
-  return path.join(artifactRoot, 'compiler-cache', projectName, 'dist');
+  const sessionSegment = toPathSegment(serverSessionId);
+  return path.join(artifactRoot, 'compiler-cache', projectName, sessionSegment, 'dist');
 }
 
 function arraysEqual(left: string[], right: string[]): boolean {
@@ -259,9 +249,8 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
   const filePath = String(payload.filePath || '');
   const sourceText = typeof payload.sourceText === 'string' ? payload.sourceText : String(payload.sourceText || '');
   const outDir = String(payload.outDir || '');
-  const artifactRoot = typeof payload.artifactRoot === 'string' && payload.artifactRoot.trim()
-    ? String(payload.artifactRoot)
-    : path.join(process.cwd(), '.nojsx-live-preview');
+  const serverSessionId = normalizeServerSessionId(payload.serverProcessRef ?? payload.serverSessionId);
+  const artifactRoot = path.join(os.tmpdir(), 'nojsx-live-preview', 'shared');
 
   if (!filePath || !outDir) {
     throw new Error('Preview compile payload requires filePath and outDir.');
@@ -269,7 +258,7 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
 
   const projectRoot = findNearestPackageRoot(filePath);
   const tsconfigPath = findNearestTsconfig(path.dirname(filePath));
-  const stableEmitRoot = getStableEmitRoot(artifactRoot, filePath);
+  const stableEmitRoot = getStableEmitRoot(artifactRoot, filePath, serverSessionId);
   const tempEmitRoot = outDir;
   const tempEmitRootNormalized = path.resolve(tempEmitRoot).replace(/\\/g, '/');
   const stableEmitRootNormalized = path.resolve(stableEmitRoot).replace(/\\/g, '/');
@@ -335,9 +324,9 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
   const fallbackStableEntryJsPath = path.join(stableEmitRoot, relativeEntryEmitPath);
   const rootNames = [filePath];
   if (isShellPageParentEntry(sourceText)) {
-    rootNames.push(...await discoverPageSourceFiles(filePath));
+    rootNames.push(...await discoverPageSourceFiles(filePath, findNearestPackageRoot));
   }
-  const cacheKey = createCompilerCacheKey(filePath, tsconfigPath, stableEmitRoot, jsxImportSource);
+  const cacheKey = createCompilerCacheKey(filePath, tsconfigPath, jsxImportSource, serverSessionId);
   const cacheEntry = createOrRefreshCompilerCacheEntry({
     key: cacheKey,
     tsconfigPath,

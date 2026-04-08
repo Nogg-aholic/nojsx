@@ -58,11 +58,11 @@ function getNavPathFromLocation(): string {
 
 	// In file/app shells, index.html is the true entrypoint and route should live in hash.
 	if (pathname === "/") {
-		return rawHash.startsWith("#/") ? rawHash.slice(1) : "/home";
+		return rawHash.startsWith("#/") ? rawHash.slice(1) : "/";
 	}
 
 	if (pathname.endsWith("/index.html") || pathname.endsWith("\\index.html")) {
-		return rawHash.startsWith("#/") ? rawHash.slice(1) : "/home";
+		return rawHash.startsWith("#/") ? rawHash.slice(1) : "/";
 	}
 
 	return `${pathname}${search}`;
@@ -71,9 +71,7 @@ function getNavPathFromLocation(): string {
 function normalizeNavPath(path: string): string {
 	if (!path) return "/";
 	if (path.startsWith("http://") || path.startsWith("https://")) return path;
-	if (path === "/home") return "/";
 	if (path.startsWith("/")) return path;
-	if (path === "home") return "/";
 	return `/${path}`;
 }
 
@@ -105,13 +103,6 @@ function renderShell(): void {
 	info.innerHTML = html;
 }
 
-function renderRoutedContent(): void {
-	renderShell();
-	const outlet = g.__nojsxNavOutlet;
-	if (outlet && typeof outlet.render === "function") {
-		outlet.render();
-	}
-}
 
 function navigateInternal(path: string): void {
 	const next = normalizeNavPath(path);

@@ -4,15 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:build": "bun ../../scripts/example-app-dev-build.ts",
-    "dev:watch": "bun ../../scripts/example-app-dev-watch.ts",
-    "dev:serve": "bun ./src/server.ts",
-    "dev": "bun ../../scripts/example-app-dev-watch.ts"
+    "build": "bun ./script/example-app-dev-build.ts --app-root . --origin http://127.0.0.1:4173",
+    "dev:build": "bun ./script/example-app-dev-build.ts --app-root . --origin http://127.0.0.1:4173",
+    "dev:watch": "bun ./script/example-app-dev-watch.ts",
+    "dev:serve": "bun --watch ./src/server.ts",
+    "dev": "bun ./script/example-app-dev.ts"
   },
   "dependencies": {
     "nojsx": "file:../../nojsx.tgz"
   },
   "devDependencies": {
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "@types/bun": "latest",
+		"@types/node": "^25.5.2"
   }
 }

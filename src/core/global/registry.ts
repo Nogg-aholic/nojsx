@@ -144,10 +144,6 @@ export class nojsxRegistry {
                 this.consumePreservedSubtree(top, keyed);
                 return keyed;
             }
-
-            // An explicit key requests a specific preserved sibling instance.
-            // Falling back to any same-name sibling breaks keyed identity across rerenders.
-            return null;
         }
 
         const directPattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}(?::[^.]+|#[^.]+)?$`);
@@ -235,7 +231,7 @@ export class nojsxRegistry {
         existingEntry.nContext = entry.nContext;
         existingEntry.parentId = entry.parentId;
         existingEntry.childIds = [];
-        (existingEntry.result as any).children = [];
+        (existingEntry.result).children = [];
 
         // Ensure the entry still points at the preserved instance.
         if (preservedInstance) {

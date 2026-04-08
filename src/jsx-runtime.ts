@@ -9,7 +9,7 @@ import { componentRegistry } from './core/global/registry.js';
 import type { __nojsxSlotCaptureToken, nojsxComponent } from './core/types/index.js';
 import { bootstrapClientRuntime } from './core/util/client-bootstrap.js';
 import { renderSlotChildren, join as _join } from './core/util/util.js';
-import { NComponent } from './core/components/components.js';
+import { NComponent, NComponentProps } from './core/components/components.js';
 
 // Make join function globally available
 (globalThis as any).join = _join;
@@ -227,7 +227,7 @@ function ensureNojsxSlotCaptureWiring(): void {
 	slotDebug('wiring installed', { roots: Object.keys(n) });
 }
 
-function getNojsxSlotKeyFromComponent(component: any): string {
+function getNojsxSlotKeyFromComponent(component: NComponent): string {
 	const nameOf = (node: any): string | undefined =>
 		node?.__nojsxSlotTemplateName ??
 		(typeof node?.template === 'string' ? node.template : node?.template?.name) ??
@@ -238,7 +238,7 @@ function getNojsxSlotKeyFromComponent(component: any): string {
 	if (!component?.__nojsxParent) return ownName ?? 'Slot';
 
 	const parts: string[] = [];
-	let cur: any = component;
+	let cur: NComponent = component;
 	while (cur && cur.__nojsxParent) {
 		const name: string | undefined = nameOf(cur);
 		if (name) parts.push(name);
@@ -260,7 +260,7 @@ function peekSlotCaptureTokenFor(rootName: string, parentId: string | null): __n
 	return undefined;
 }
 
-function consumeSlotCaptureTokenFor(component: unknown, parentId: string | null): { rootName: string; slots: Record<string, string> } | undefined {
+function consumeSlotCaptureTokenFor(component: NComponent, parentId: string | null): { rootName: string; slots: Record<string, string> } | undefined {
 	const stack = g.__nojsxSlotCaptureStack;
 	if (!stack || stack.length === 0) return undefined;
 
@@ -299,8 +299,47 @@ function escapeHtml(str: unknown): string {
 function renderChildren(children: unknown): string {
 	if (children == null || children === false) return '';
 	if (Array.isArray(children)) return children.map(renderChildren).join('');
+	if (typeof children === 'function') {
+		if ((children as any).__nojsxDeferredComponentRender === true) {
+			return String((children as any)());
+		}
+		return '';
+	}
 	if (typeof children === 'object') return String(children);
 	return String(children);
+}
+
+function createDeferredNojsxComponentRender(tag: Function, nextProps: NComponentProps & { __parentId?: string | null }): () => string {
+	const evaluate = () => {
+		const preserveActive = componentRegistry.isPreserveChildrenActive();
+		const parentRenderParent = componentRegistry.getRenderParent();
+		const componentName = String((tag)?.name ?? 'Component');
+		const explicitKey = (nextProps as NComponentProps)?.key ?? (nextProps as NComponentProps)?.__key;
+		const reusedId = preserveActive && parentRenderParent
+			? componentRegistry.consumePreservedDirectChild(parentRenderParent, componentName, explicitKey)
+			: null;
+
+		if (reusedId && componentRegistry.has(reusedId)) {
+			const existing = componentRegistry.get(reusedId).result;
+			if (parentRenderParent && componentRegistry.has(parentRenderParent)) {
+				const parentEntry = componentRegistry.get(parentRenderParent);
+				parentEntry.childIds.push(reusedId);
+				const parentInstance = parentEntry.result;
+				parentInstance.children = parentInstance.children ?? [];
+				if (!parentInstance.children.some((child) => child?.id === reusedId)) {
+					parentInstance.children.push(existing);
+				}
+			}
+			const cls = (nextProps as any)?.class;
+			return injectAttributes('<div></div>', reusedId, cls);
+		}
+
+		const instance = new (tag as any)(nextProps);
+		return String(instance.__html());
+	};
+
+	(evaluate as any).__nojsxDeferredComponentRender = true;
+	return evaluate;
 }
 
 function isNojsxComponentConstructor(fn: Function): boolean {
@@ -398,32 +437,7 @@ export function jsx(tag: string | Function | symbol, props?: JSX.HtmlTag, jsxKey
 
 		// Class-based NComponent
 		if (isNojsxComponentConstructor(tag)) {
-			const preserveActive = componentRegistry.isPreserveChildrenActive();
-			const parentRenderParent = componentRegistry.getRenderParent();
-			const componentName = String((tag as any)?.name ?? 'Component');
-			const explicitKey = (nextProps as any)?.key ?? (nextProps as any)?.__key;
-			const reusedId = preserveActive && parentRenderParent
-				? componentRegistry.consumePreservedDirectChild(parentRenderParent, componentName, explicitKey)
-				: null;
-
-			if (reusedId && componentRegistry.has(reusedId)) {
-				const existing = componentRegistry.get(reusedId).result as any;
-				if (parentRenderParent && componentRegistry.has(parentRenderParent)) {
-					const parentEntry = componentRegistry.get(parentRenderParent);
-					parentEntry.childIds.push(reusedId);
-					const parentInstance = parentEntry.result as any;
-					parentInstance.children = parentInstance.children ?? [];
-					if (!parentInstance.children.some((child: any) => child?.id === reusedId)) {
-						parentInstance.children.push(existing);
-					}
-				}
-				const cls = (nextProps as any)?.class;
-				return injectAttributes('<div></div>', reusedId, cls);
-			}
-
-			const instance = new (tag as any)(nextProps);
-			const result = String(instance.__html());
-			return result;
+			return createDeferredNojsxComponentRender(tag, nextProps) as unknown as string;
 		}
 
 		// Function component
@@ -438,12 +452,12 @@ export function jsx(tag: string | Function | symbol, props?: JSX.HtmlTag, jsxKey
 		// - nojsxComponent: { template: fn, slots?: [...] }
 		// - slot placeholder: { template: string } (may still have `slots` for structure/typing)
 		let templateFunction: Function | undefined;
-		const isSlotPlaceholder = typeof (tag as any)?.template === 'string';
+		const isSlotPlaceholder = typeof (tag as nojsxComponent)?.template === 'string';
 		if (isSlotPlaceholder) {
 			templateFunction = (p: any) => renderSlotChildren(p?.children);
 		} else {
 			const nojsxComponent = tag as nojsxComponent;
-			templateFunction = typeof (nojsxComponent as any).template === 'function' ? (nojsxComponent as any).template : undefined;
+			templateFunction = typeof (nojsxComponent).template === 'function' ? (nojsxComponent).template : undefined;
 			// Keep verbose object logging behind the debug flag.
 			slotDebug('render component slot', {
 				name:
@@ -658,9 +672,6 @@ export function livePreviewJSX(tag: string | Function | symbol, props?: JSX.Html
 		const instance = new (tag as any)(props ?? {});
 		const initialHtml = String(instance.__html());
 		mountEl.innerHTML = initialHtml;
-		if (typeof (instance as any).render === 'function') {
-			(instance as any).render();
-		}
 		return initialHtml;
 	}
 
@@ -759,6 +770,12 @@ export function injectAttributes(html: string, id: string, className?: string): 
 	// First, replace any data-cid attributes with the actual component ID
 	html = html.replace(/data-cid="\{nContext\.id\}"/g, `data-cid="${id}"`);
 	html = html.replace(/data-cid=\{[^}]+\}/g, `data-cid="${id}"`);
+	const trimmed = html.trimStart();
+	if (!trimmed.startsWith('<')) return `<div data-component-id="${id}"${className ? ` class="${className}"` : ''}>${html}</div>`;
+	const secondTagStart = trimmed.indexOf('<', trimmed.indexOf('>') + 1);
+	if (secondTagStart !== -1 && !trimmed.slice(secondTagStart).startsWith('</')) {
+		return `<div data-component-id="${id}"${className ? ` class="${className}"` : ''}>${html}</div>`;
+	}
 
 	const firstTagEnd = html.indexOf('>');
 	if (firstTagEnd === -1) return html;

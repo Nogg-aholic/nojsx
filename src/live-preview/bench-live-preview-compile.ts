@@ -34,7 +34,6 @@ async function main(): Promise<void> {
       filePath,
       sourceText,
       outDir,
-      artifactRoot,
     });
     const durationMs = Number((performance.now() - startedAt).toFixed(1));
 

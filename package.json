@@ -1,13 +1,14 @@
 {
 	"name": "nojsx",
-	"version": "1.0.6",
+	"version": "1.0.22",
 	"type": "module",
 	"scripts": {
 		"clean:dist": "bun scripts/clean-dist.ts",
-		"build": "bun run clean:dist && bunx tsc -p tsconfig.json && bunx tsc -p tsconfig.scripts.json && bun scripts/assert-dist-relative-import-extensions.ts && bun scripts/mirror-dist-to-root.ts",
-		"compile": "bun run build",
-		"pack:tgz": "bun run build && bun scripts/pack-tgz.ts",
+		"build": "bun run clean:dist && bunx tsc -p tsconfig.json && bun scripts/copy-src-dts-to-dist.ts && bunx tsc -p tsconfig.scripts.json && bun scripts/assert-dist-relative-import-extensions.ts && bun scripts/mirror-dist-to-root.ts",
+		"compile": "bun run pack:tgz",
+		"pack:tgz": "bun run clean:dist && bun run build && bun scripts/pack-tgz.ts",
 		"refresh:examples": "bun scripts/refresh-examples.ts",
+		"release:examples": "bun scripts/refresh-examples.ts",
 		"example:minimal": "npm --prefix ./examples/nojsx-minimal install && npm --prefix ./examples/nojsx-minimal run build",
 		"test:tgz:minimal": "bun run pack:tgz && npm --prefix ./examples/nojsx-minimal install && npm --prefix ./examples/nojsx-minimal run build"
 	},
@@ -30,6 +31,10 @@
 		"./jsx-dev-runtime": {
 			"types": "./dist/jsx-dev-runtime.d.ts",
 			"import": "./dist/jsx-dev-runtime.js"
+		},
+		"./dev": {
+			"types": "./dist/dev/build-nojsx-app-dev.d.ts",
+			"import": "./dist/dev/build-nojsx-app-dev.js"
 		},
 		"./core/styles/nojsx.css": "./src/core/styles/nojsx.css",
 		"./core/*": {

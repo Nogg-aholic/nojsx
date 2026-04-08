@@ -6,14 +6,36 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const srcRoot = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.dirname(srcRoot);
-const devRoot = path.join(appRoot, ".nojsx-dev");
+const devRoot = path.join(appRoot, "dist");
+const liveReloadStampPath = path.join(devRoot, ".nojsx-live-reload.json");
 const port = Number(process.env.PORT || 4173);
+const liveReloadClients = new Set<WritableStreamDefaultWriter<string>>();
+
+function broadcastLiveReload(version: number): void {
+	const payload = `data: ${JSON.stringify({ version })}\n\n`;
+	for (const writer of Array.from(liveReloadClients)) {
+		void writer.write(payload).catch(() => {
+			liveReloadClients.delete(writer);
+			void writer.close().catch(() => {});
+		});
+	}
+}
+
+async function readLiveReloadVersion(): Promise<number> {
+	try {
+		const raw = await readFile(liveReloadStampPath, "utf8");
+		const parsed = JSON.parse(raw) as { version?: number };
+		return Number(parsed.version ?? 0);
+	} catch {
+		return 0;
+	}
+}
 
 function findRepoRoot(startDir: string): string {
 	let current = startDir;
 	while (true) {
 		const pkgPath = path.join(current, "package.json");
-		const scriptsPath = path.join(current, "scripts", "example-app-dev-build.ts");
+		const scriptsPath = path.join(current, "script", "example-app-dev-build.ts");
 		if (existsSync(pkgPath) && existsSync(scriptsPath)) {
 			return current;
 		}
@@ -27,7 +49,7 @@ function findRepoRoot(startDir: string): string {
 }
 
 const repoRoot = findRepoRoot(appRoot);
-const buildScriptPath = path.join(repoRoot, "scripts", "example-app-dev-build.ts");
+const buildScriptPath = path.join(repoRoot, "script", "example-app-dev-build.ts");
 
 function contentType(filePath: string): string {
 	const ext = path.extname(filePath).toLowerCase();
@@ -122,6 +144,43 @@ const server = Bun.serve({
 	development: true,
 	async fetch(request: Request) {
 		const requestUrl = new URL(request.url);
+
+		if (requestUrl.pathname === "/__nojsx_live_reload") {
+			const stream = new TransformStream<string, Uint8Array>({
+				transform(chunk, controller) {
+					controller.enqueue(new TextEncoder().encode(chunk));
+				},
+			});
+			const writer = stream.writable.getWriter();
+			liveReloadClients.add(writer);
+
+			const version = await readLiveReloadVersion();
+			await writer.write(`retry: 1000\n`);
+			await writer.write(`data: ${JSON.stringify({ version })}\n\n`);
+
+			request.signal.addEventListener("abort", () => {
+				liveReloadClients.delete(writer);
+				void writer.close().catch(() => {});
+			}, { once: true });
+
+			return new Response(stream.readable, {
+				headers: {
+					"content-type": "text/event-stream; charset=utf-8",
+					"cache-control": "no-cache, no-store, must-revalidate",
+					connection: "keep-alive",
+					"x-accel-buffering": "no",
+				},
+			});
+		}
+
+		if (requestUrl.pathname === "/__nojsx_live_reload/publish" && request.method === "POST") {
+			const payload = await request.json().catch(() => null) as { version?: number } | null;
+			const version = Number(payload?.version ?? 0) || Date.now();
+			await Bun.write(liveReloadStampPath, JSON.stringify({ version }));
+			broadcastLiveReload(version);
+			return Response.json({ ok: true, version }, { headers: { "cache-control": "no-cache" } });
+		}
+
 		await ensurePrepared(requestUrl.origin);
 
 		const relativePath = normalizeRequestPath(requestUrl);

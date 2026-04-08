@@ -1,5 +1,28 @@
 import { NComponent, NComponentProps } from './components.js';
-import type { nojsxGlobals } from '../global/registry.js';
+import { componentRegistry, type nojsxGlobals } from '../global/registry.js';
+
+type CurrentPageState = {
+	fullPath: string;
+	pathname: string;
+	query: string;
+	template: string;
+	params: Record<string, string>;
+	componentName: string;
+	routeKey: string;
+};
+
+type CachedPageState = {
+	componentName: string;
+	instance: NComponent;
+};
+
+function escapeAttribute(value: string): string {
+	return value
+		.replaceAll('&', '&amp;')
+		.replaceAll('"', '&quot;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;');
+}
 
 function splitPath(fullPath: string): { pathname: string; query: string } {
 	const qIndex = fullPath.indexOf('?');
@@ -120,14 +143,14 @@ function pickRoute(pathname: string): { template: string; entry: any; params: Re
 	return { template: first[0], entry: first[1], params: {} };
 }
 
-function getPageComponent(): string {
+function getCurrentPageState(): CurrentPageState | null {
 	const g = globalThis as any;
 	g.__nojsxNav = g.__nojsxNav ?? { path: '/' };
 	const fullPath = String(g.__nojsxNav.path ?? (typeof window !== 'undefined' ? window.location.pathname : '/'));
 	const { pathname, query } = splitPath(fullPath);
 
 	const picked = pickRoute(pathname);
-	if (!picked) return '';
+	if (!picked) return null;
 
 	g.__nojsxNav.path = fullPath;
 	g.__nojsxNav.pathname = pathname;
@@ -136,19 +159,73 @@ function getPageComponent(): string {
 	g.__nojsxNav.params = picked.params;
 
 	const componentName = picked.entry?.componentName as string | undefined;
-	if (!componentName) return '';
+	if (!componentName) return null;
 
-	const Page = (globalThis as unknown as nojsxGlobals).__nojsxComponentLoaders?.[componentName];
-	if (!Page) return '';
-	return Page({ __key: navInstanceKey(fullPath) }).__html();
+	return {
+		fullPath,
+		pathname,
+		query,
+		template: picked.template,
+		params: picked.params,
+		componentName,
+		routeKey: navInstanceKey(fullPath),
+	};
 }
 
 export class NavOutlet extends NComponent {
+	private pageCache = new Map<string, CachedPageState>();
+
 	constructor(props?: NComponentProps) {
 		super('NavOutlet', props);
 	}
 
-	html = (): JSX.Element => <div>{getPageComponent()}</div>;
+	private ensureCachedPage(routeKey: string, componentName: string): NComponent | null {
+		const cached = this.pageCache.get(routeKey);
+		if (cached && cached.componentName === componentName) {
+			componentRegistry.consumePreservedChildId(cached.instance.id);
+			return cached.instance;
+		}
+
+		const Page = (globalThis as unknown as nojsxGlobals).__nojsxComponentLoaders?.[componentName];
+		if (!Page) {
+			return null;
+		}
+
+		const instance = Page({ __key: routeKey }) as NComponent;
+		this.pageCache.set(routeKey, { componentName, instance });
+		componentRegistry.consumePreservedChildId(instance.id);
+		return instance;
+	}
+
+	private renderCachedPage(routeKey: string, currentRouteKey: string, cached: CachedPageState): string {
+		const isActive = routeKey === currentRouteKey;
+		const wrapperClass = isActive ? '' : 'hidden';
+		const mounted = typeof document !== 'undefined'
+			&& !!document.querySelector(`[data-component-id="${cached.instance.id}"]`);
+
+		const pageMarkup = mounted
+			? `<div data-component-id="${escapeAttribute(cached.instance.id)}"></div>`
+			: cached.instance.__html();
+
+		return `<div class="${wrapperClass}" data-nojsx-route="${escapeAttribute(routeKey)}">${pageMarkup}</div>`;
+	}
+
+	html = (): JSX.Element => {
+		const currentPage = getCurrentPageState();
+		if (!currentPage) {
+			return <div></div>;
+		}
+
+		for (const cached of this.pageCache.values()) {
+			componentRegistry.consumePreservedChildId(cached.instance.id);
+		}
+
+		this.ensureCachedPage(currentPage.routeKey, currentPage.componentName);
+
+		return `<div>${Array.from(this.pageCache.entries())
+			.map(([routeKey, cached]) => this.renderCachedPage(routeKey, currentPage.routeKey, cached))
+			.join('')}</div>`;
+	};
 
 	onLoad: () => void = () => {
 		(globalThis as any).__nojsxNavOutlet = this;
