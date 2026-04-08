@@ -302,6 +302,57 @@ function rewriteProviderImportsForNode(source: string, provider: ProviderInfo): 
     .replace(/(import\s+["'])([^"']+)(["'])/g, (_match, start, specifier, end) => `${start}${rewriteSpecifier(specifier)}${end}`);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getPreviewPackageRequestDir(): string {
+  const livePreview = (globalThis as any).__livePreview as { requestPath?: string; filePath?: string; projectRoot?: string } | undefined;
+  const requestPath = typeof livePreview?.requestPath === 'string'
+    ? livePreview.requestPath.replace(/\\/g, '/')
+    : '';
+  const filePath = typeof livePreview?.filePath === 'string'
+    ? livePreview.filePath.replace(/\\/g, '/')
+    : '';
+  const projectRoot = typeof livePreview?.projectRoot === 'string'
+    ? livePreview.projectRoot.replace(/\\/g, '/')
+    : '';
+
+  const requestDir = requestPath ? path.posix.dirname(requestPath) : '';
+  if (!requestDir || !filePath || !projectRoot) {
+    return requestDir;
+  }
+
+  const relativeFilePath = path.relative(projectRoot, filePath).replace(/\\/g, '/');
+  if (!relativeFilePath || relativeFilePath.startsWith('..')) {
+    return requestDir;
+  }
+
+  const relativeFileDir = path.posix.dirname(relativeFilePath);
+  if (!relativeFileDir || relativeFileDir === '.') {
+    return requestDir;
+  }
+
+  const relativeDirPattern = new RegExp(`(?:^|/)${escapeRegExp(relativeFileDir)}$`);
+  if (relativeDirPattern.test(requestDir)) {
+    return requestDir.slice(0, requestDir.length - relativeFileDir.length).replace(/\/+$/, '');
+  }
+
+  const requestSegments = requestDir.split('/').filter(Boolean);
+  const relativeSegments = relativeFileDir.split('/').filter(Boolean);
+  if (relativeSegments.length === 0 || requestSegments.length < relativeSegments.length) {
+    return requestDir;
+  }
+
+  const tailMatches = relativeSegments.every((segment, index) => requestSegments[requestSegments.length - relativeSegments.length + index] === segment);
+  if (!tailMatches) {
+    return requestDir;
+  }
+
+  const packageSegments = requestSegments.slice(0, requestSegments.length - relativeSegments.length);
+  return packageSegments.length > 0 ? `/${packageSegments.join('/')}` : '';
+}
+
 function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined, provider: ProviderInfo): string {
   const prefix = `${provider.jsxImportSource}/`;
   if (!specifier.startsWith(prefix)) {
@@ -312,14 +363,7 @@ function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined
     throw new Error('[livePreview] httpPort is required to build browser preview modules.');
   }
 
-  const livePreview = (globalThis as any).__livePreview as { requestPath?: string } | undefined;
-  const requestPath = typeof livePreview?.requestPath === 'string'
-    ? livePreview.requestPath.replace(/\\/g, '/')
-    : '';
-  const requestDir = requestPath ? path.posix.dirname(requestPath) : '';
-  const packageRequestDir = requestDir.endsWith('/src')
-    ? requestDir.slice(0, -4)
-    : requestDir;
+  const packageRequestDir = getPreviewPackageRequestDir();
   const providerSubpath = specifier.slice(prefix.length);
   const browserPath = providerSubpath
     ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
