@@ -377,6 +377,15 @@ function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined
   return `http://127.0.0.1:${httpPort}/${requestRelativePath.replace(/^\/+/, '')}`;
 }
 
+function getPreviewPathDebugSummary(): string {
+  const livePreview = (globalThis as any).__livePreview as { requestPath?: string; filePath?: string; projectRoot?: string } | undefined;
+  const requestPath = typeof livePreview?.requestPath === 'string' ? livePreview.requestPath.replace(/\\/g, '/') : '';
+  const filePath = typeof livePreview?.filePath === 'string' ? livePreview.filePath.replace(/\\/g, '/') : '';
+  const projectRoot = typeof livePreview?.projectRoot === 'string' ? livePreview.projectRoot.replace(/\\/g, '/') : '';
+  const packageBase = getPreviewPackageRequestDir();
+  return `rq=${requestPath || '-'}|fp=${filePath || '-'}|pr=${projectRoot || '-'}|pb=${packageBase || '-'}`;
+}
+
 function rewriteProviderImportsForBrowser(source: string, httpPort: number | undefined, provider: ProviderInfo): string {
   const prefix = `${provider.jsxImportSource}/`;
   const rewriteSpecifier = (specifier: string): string => {
@@ -945,7 +954,7 @@ async function buildInlinePreviewHtml({
     .join('\n');
 
   return renderShellPageParentDocument({
-    title: `${shellLayout?.title || `${provider.jsxImportSource} TSX Preview`} [runner:1.0.34-pathfix]`,
+    title: `${shellLayout?.title || `${provider.jsxImportSource} TSX Preview`} [runner:1.0.34-pathfix ${getPreviewPathDebugSummary()}]`,
     importMap: {
       [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxRuntime).href,
       [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-dev-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxDevRuntime).href,
