@@ -176,9 +176,6 @@ function findPackageRootFromResolvedFile(filePath: string): string | undefined {
 }
 
 async function resolveJsxProvider(filePath: string, sourceText: string, runnerPathOverride?: string): Promise<ProviderInfo> {
-  if(0){
-    throw new Error("hello from bundle");
-  }
   const tsconfigPath = findNearestTsconfig(path.dirname(filePath));
   const jsxImportSource = readJsxImportSourcePragma(sourceText)
     || await readTsconfigJsxImportSource(tsconfigPath)
@@ -316,10 +313,11 @@ function rewriteProviderImportsForBrowser(source: string, httpPort: number | und
       throw new Error('[livePreview] httpPort is required to build browser preview modules.');
     }
 
-    const targetPath = resolveProviderSpecifier(provider, specifier);
-    const servedBaseRoot = provider.providerPackageRoot || provider.projectRoot;
-    const relativeTarget = path.relative(servedBaseRoot, targetPath).replace(/\\/g, '/');
-    return `http://127.0.0.1:${httpPort}/${relativeTarget}`;
+    const providerSubpath = specifier.slice(prefix.length);
+    const browserPath = providerSubpath
+      ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
+      : `node_modules/${provider.jsxImportSource}`;
+    return `http://127.0.0.1:${httpPort}/${browserPath}`;
   };
 
   return source
@@ -856,7 +854,6 @@ async function buildInlinePreviewHtml({
   const runtimeBase = typeof httpPort === 'number' && Number.isFinite(httpPort)
     ? `http://127.0.0.1:${httpPort}`
     : '';
-  const urlBaseRoot = provider.providerPackageRoot || provider.projectRoot;
   const shellLayout = isShellPageParentEntry(sourceText)
     ? await readShellPageLayoutFields(filePath)
     : undefined;
@@ -871,10 +868,10 @@ async function buildInlinePreviewHtml({
   return renderShellPageParentDocument({
     title: shellLayout?.title || `${provider.jsxImportSource} TSX Preview`,
     importMap: {
-      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.jsxRuntime).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.jsxRuntime).href,
-      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.jsxDevRuntime).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.jsxDevRuntime).href,
-      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.components).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.components).href,
-      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? `http://127.0.0.1:${httpPort}/${path.relative(urlBaseRoot, provider.resolved.clientBootstrap).replace(/\\/g, '/')}` : pathToFileURL(provider.resolved.clientBootstrap).href,
+      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/jsx-runtime.js` : pathToFileURL(provider.resolved.jsxRuntime).href,
+      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/jsx-dev-runtime.js` : pathToFileURL(provider.resolved.jsxDevRuntime).href,
+      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/core/components/components.js` : pathToFileURL(provider.resolved.components).href,
+      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? `${runtimeBase}/node_modules/${provider.jsxImportSource}/core/util/client-bootstrap.js` : pathToFileURL(provider.resolved.clientBootstrap).href,
     },
     shellSrc: '',
     shellScriptHtml: `<script type="module">\nimport ${JSON.stringify(autoMountEntryUrl)};\n</script>`,
