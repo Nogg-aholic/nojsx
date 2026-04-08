@@ -317,7 +317,8 @@ function rewriteProviderImportsForBrowser(source: string, httpPort: number | und
     }
 
     const targetPath = resolveProviderSpecifier(provider, specifier);
-    const relativeTarget = path.relative(findNearestPackageRoot(provider.projectRoot), targetPath).replace(/\\/g, '/');
+    const servedBaseRoot = provider.providerPackageRoot || provider.projectRoot;
+    const relativeTarget = path.relative(servedBaseRoot, targetPath).replace(/\\/g, '/');
     return `http://127.0.0.1:${httpPort}/${relativeTarget}`;
   };
 
@@ -855,7 +856,7 @@ async function buildInlinePreviewHtml({
   const runtimeBase = typeof httpPort === 'number' && Number.isFinite(httpPort)
     ? `http://127.0.0.1:${httpPort}`
     : '';
-  const urlBaseRoot = findNearestPackageRoot(provider.projectRoot);
+  const urlBaseRoot = provider.providerPackageRoot || provider.projectRoot;
   const shellLayout = isShellPageParentEntry(sourceText)
     ? await readShellPageLayoutFields(filePath)
     : undefined;

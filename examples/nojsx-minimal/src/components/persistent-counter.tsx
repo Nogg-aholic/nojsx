@@ -13,9 +13,11 @@ export class PersistentCounter extends NComponent {
 		super("PersistentCounter", props);
 	}
 
-	increment = () => {
+	increment =async () => {
 		this.count += 1;
 		this.render();
+        const fs = await import("fs");
+        console.log(!!fs)
 	};
 
 	html = () => {

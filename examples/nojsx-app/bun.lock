@@ -135,7 +135,7 @@
 
     "node-addon-api": ["node-addon-api@7.1.1", "", {}, "sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ=="],
 
-    "nojsx": ["nojsx@../../nojsx.tgz", { "dependencies": { "@tailwindcss/cli": "^4.2.2", "@tailwindcss/forms": "^0.5.11", "tailwindcss": "^4.2.2" }, "bin": { "nojsx-build-css": "./dist/scripts/build-tailwind.js", "nojsx-generate-component-loaders": "./dist/scripts/generate-component-loaders.js" } }, "sha512-bPin1uoGSQezNm9HM0ppK2guv2AnxZ+HGSuGWXtsPMsJGz45LLpyb6K+QW11/vH4wRhs95IWOkWhKWrXse3rYw=="],
+    "nojsx": ["nojsx@../../nojsx.tgz", { "dependencies": { "@tailwindcss/cli": "^4.2.2", "@tailwindcss/forms": "^0.5.11", "tailwindcss": "^4.2.2" }, "bin": { "nojsx-build-css": "./dist/scripts/build-tailwind.js", "nojsx-generate-component-loaders": "./dist/scripts/generate-component-loaders.js" } }, "sha512-GtfKXp1Ld2j6Dam3BPn+2c9MYZ/tdn/Hl4T1yTD3rwZmZnCzFOHo5MySe0qfrCUIJ6FUI3ppegQx6dJyXiL4Gw=="],
 
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 

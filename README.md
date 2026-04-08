@@ -6,7 +6,7 @@ The anchor concept for this package is:
 
 > **Simple class-based UI composition**: components render and update in the browser with minimal runtime ceremony.
 
-This document is concept-first. For deeper implementation details, see [`docs/components.md`](./docs/components.md) and [`docs/generation-pipeline.md`](./docs/generation-pipeline.md).
+This document is concept-first. For practical app-author guidance, see [`docs/usage.md`](./docs/usage.md). For deeper implementation details, see [`docs/components.md`](./docs/components.md) and [`docs/generation-pipeline.md`](./docs/generation-pipeline.md).
 
 ---
 
@@ -129,6 +129,7 @@ The remaining placeholder files under `src/core/*generated*` are transitional cl
 
 ## Additional docs
 
+- [Usage guide for app authors](docs/usage.md)
 - [Component model + authoring details](docs/components.md)
 - [Generation pipeline and troubleshooting](docs/generation-pipeline.md)
 - [Consumer migration: generated component loaders](docs/generation-pipeline.md#consumer-migration-loader-generation-moved-to-app-prebuild)

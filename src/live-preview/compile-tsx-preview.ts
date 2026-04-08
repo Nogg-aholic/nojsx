@@ -1,7 +1,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
-import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
@@ -20,6 +20,7 @@ type PreviewCompilerCacheEntry = {
   rootNames: string[];
   versionByFile: Map<string, number>;
   textByFile: Map<string, string>;
+  stampByFile: Map<string, string>;
 };
 
 const previewCompilerCache = new Map<string, PreviewCompilerCacheEntry>();
@@ -155,7 +156,51 @@ function arraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function createOrRefreshCompilerCacheEntry(params: {
+async function getFileStamp(filePath: string): Promise<string | undefined> {
+  try {
+    const fileStat = await stat(filePath);
+    return `${fileStat.mtimeMs}:${fileStat.size}`;
+  } catch {
+    return undefined;
+  }
+}
+
+async function refreshDependencyVersions(cacheEntry: PreviewCompilerCacheEntry, filePath: string): Promise<void> {
+  const normalizedEntryPath = path.resolve(filePath);
+  const builder = cacheEntry.builder;
+  const program = builder?.getProgram();
+  if (!program) {
+    return;
+  }
+
+  const referencedFiles = program.getSourceFiles()
+    .map((sourceFile) => path.resolve(sourceFile.fileName))
+    .filter((sourcePath) => sourcePath !== normalizedEntryPath)
+    .filter((sourcePath) => !sourcePath.endsWith('.d.ts'))
+    .filter((sourcePath) => /\.(ts|tsx)$/i.test(sourcePath));
+
+  for (const dependencyPath of referencedFiles) {
+    const nextStamp = await getFileStamp(dependencyPath);
+    const previousStamp = cacheEntry.stampByFile.get(dependencyPath);
+    if (nextStamp == null) {
+      cacheEntry.stampByFile.delete(dependencyPath);
+      cacheEntry.versionByFile.set(dependencyPath, (cacheEntry.versionByFile.get(dependencyPath) || 0) + 1);
+      continue;
+    }
+
+    if (previousStamp == null) {
+      cacheEntry.stampByFile.set(dependencyPath, nextStamp);
+      continue;
+    }
+
+    if (previousStamp !== nextStamp) {
+      cacheEntry.stampByFile.set(dependencyPath, nextStamp);
+      cacheEntry.versionByFile.set(dependencyPath, (cacheEntry.versionByFile.get(dependencyPath) || 0) + 1);
+    }
+  }
+}
+
+async function createOrRefreshCompilerCacheEntry(params: {
   key: string;
   tsconfigPath?: string;
   projectRoot: string;
@@ -166,7 +211,7 @@ function createOrRefreshCompilerCacheEntry(params: {
   rootNames: string[];
   filePath: string;
   sourceText: string;
-}): PreviewCompilerCacheEntry {
+}): Promise<PreviewCompilerCacheEntry> {
   const normalizedRootNames = [...params.rootNames].map((name) => path.resolve(name)).sort();
   const normalizedFilePath = path.resolve(params.filePath);
   const existing = previewCompilerCache.get(params.key);
@@ -181,11 +226,13 @@ function createOrRefreshCompilerCacheEntry(params: {
     existing.compilerOptions = params.compilerOptions;
     existing.sourceRootPath = params.sourceRootPath;
     existing.baseUrlPath = params.baseUrlPath;
+    await refreshDependencyVersions(existing, normalizedFilePath);
     return existing;
   }
 
   const versionByFile = new Map<string, number>();
   const textByFile = new Map<string, string>();
+  const stampByFile = new Map<string, string>();
   versionByFile.set(normalizedFilePath, 1);
   textByFile.set(normalizedFilePath, params.sourceText);
 
@@ -239,6 +286,7 @@ function createOrRefreshCompilerCacheEntry(params: {
     rootNames: normalizedRootNames,
     versionByFile,
     textByFile,
+    stampByFile,
   };
 
   previewCompilerCache.set(params.key, entry);
@@ -327,7 +375,7 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
     rootNames.push(...await discoverPageSourceFiles(filePath, findNearestPackageRoot));
   }
   const cacheKey = createCompilerCacheKey(filePath, tsconfigPath, jsxImportSource, serverSessionId);
-  const cacheEntry = createOrRefreshCompilerCacheEntry({
+  const cacheEntry = await createOrRefreshCompilerCacheEntry({
     key: cacheKey,
     tsconfigPath,
     projectRoot,
