@@ -312,24 +312,20 @@ function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined
     throw new Error('[livePreview] httpPort is required to build browser preview modules.');
   }
 
-  const livePreview = (globalThis as any).__livePreview as { filePath?: string; projectRoot?: string; requestPath?: string } | undefined;
-  const filePath = typeof livePreview?.filePath === 'string' ? livePreview.filePath : '';
-  const projectRoot = typeof livePreview?.projectRoot === 'string' ? livePreview.projectRoot : provider.projectRoot;
-  const projectRelativeDir = filePath && projectRoot
-    ? path.posix.dirname(path.relative(projectRoot, filePath).replace(/\\/g, '/'))
-    : '';
+  const livePreview = (globalThis as any).__livePreview as { requestPath?: string } | undefined;
   const requestPath = typeof livePreview?.requestPath === 'string'
     ? livePreview.requestPath.replace(/\\/g, '/')
     : '';
-  const requestDir = projectRelativeDir && projectRelativeDir !== '.'
-    ? projectRelativeDir
-    : (requestPath ? path.posix.dirname(requestPath) : '');
+  const requestDir = requestPath ? path.posix.dirname(requestPath) : '';
+  const packageRequestDir = requestDir.endsWith('/src')
+    ? requestDir.slice(0, -4)
+    : requestDir;
   const providerSubpath = specifier.slice(prefix.length);
   const browserPath = providerSubpath
     ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
     : `node_modules/${provider.jsxImportSource}`;
-  const requestRelativePath = requestDir && requestDir !== '.'
-    ? path.posix.join(requestDir, browserPath)
+  const requestRelativePath = packageRequestDir && packageRequestDir !== '.'
+    ? path.posix.join(packageRequestDir, browserPath)
     : browserPath;
   return `http://127.0.0.1:${httpPort}/${requestRelativePath.replace(/^\/+/, '')}`;
 }
