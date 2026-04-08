@@ -307,6 +307,7 @@ function getPreviewBrowserBasePath(filePath: string, projectRoot: string): strin
     return '';
   }
 
+  const normalizedFilePath = filePath.replace(/\\/g, '/');
   const relativeFilePath = path.relative(projectRoot, filePath).replace(/\\/g, '/');
   if (!relativeFilePath || relativeFilePath.startsWith('..')) {
     return '';
@@ -317,7 +318,42 @@ function getPreviewBrowserBasePath(filePath: string, projectRoot: string): strin
     return '';
   }
 
-  return `/${relativeFileDir.replace(/\/+$/, '')}`;
+  const requestPath = typeof (globalThis as any).__livePreview?.requestPath === 'string'
+    ? String((globalThis as any).__livePreview.requestPath).replace(/\\/g, '/')
+    : '';
+  const requestDir = requestPath ? path.posix.dirname(requestPath) : '';
+  if (requestDir.endsWith(`/${relativeFileDir}`)) {
+    return requestDir.slice(0, -(relativeFileDir.length + 1));
+  }
+
+  const currentUrlPath = typeof globalThis.location?.href === 'string'
+    ? (() => {
+        try {
+          return new URL(globalThis.location.href).pathname.replace(/\\/g, '/');
+        } catch {
+          return '';
+        }
+      })()
+    : '';
+  const currentDir = currentUrlPath ? path.posix.dirname(currentUrlPath) : '';
+  if (currentDir.endsWith(`/${relativeFileDir}`)) {
+    return currentDir.slice(0, -(relativeFileDir.length + 1));
+  }
+
+  const absoluteFileSegments = normalizedFilePath.replace(/^[A-Za-z]:/, '').split('/').filter(Boolean);
+  const relativeSegments = relativeFilePath.split('/').filter(Boolean);
+  if (absoluteFileSegments.length > relativeSegments.length) {
+    const matchingFileSuffix = absoluteFileSegments.slice(-relativeSegments.length).join('/');
+    if (matchingFileSuffix === relativeFilePath) {
+      const baseSegments = absoluteFileSegments.slice(0, absoluteFileSegments.length - relativeSegments.length);
+      const packagesIndex = baseSegments.lastIndexOf('packages');
+      if (packagesIndex >= 0) {
+        return `/${baseSegments.slice(packagesIndex).join('/')}`;
+      }
+    }
+  }
+
+  return '';
 }
 
 function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined, provider: ProviderInfo, browserBasePath?: string): string {
@@ -331,9 +367,16 @@ function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined
   }
 
   const providerSubpath = specifier.slice(prefix.length);
-  const browserPath = providerSubpath
-    ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
-    : `node_modules/${provider.jsxImportSource}`;
+  let browserPath: string;
+  if (providerSubpath === 'jsx-runtime' || providerSubpath === 'jsx-dev-runtime') {
+    browserPath = `node_modules/${provider.jsxImportSource}/dist/${providerSubpath}.js`;
+  } else if (providerSubpath.startsWith('core/')) {
+    browserPath = `node_modules/${provider.jsxImportSource}/dist/${providerSubpath}.js`;
+  } else {
+    browserPath = providerSubpath
+      ? `node_modules/${provider.jsxImportSource}/${providerSubpath}.js`
+      : `node_modules/${provider.jsxImportSource}`;
+  }
   const normalizedBase = browserBasePath && browserBasePath !== '.'
     ? browserBasePath.replace(/\/+$/, '')
     : '';
