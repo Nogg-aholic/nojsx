@@ -353,6 +353,41 @@ function getPreviewPackageRequestDir(): string {
   return packageSegments.length > 0 ? `/${packageSegments.join('/')}` : '';
 }
 
+function buildPackageRequestDirFromPageUrl(filePath: string, projectRoot: string, pageUrl: string): string {
+  if (!filePath || !projectRoot || !pageUrl) {
+    return '';
+  }
+
+  let pathname = '';
+  try {
+    pathname = new URL(pageUrl).pathname.replace(/\\/g, '/');
+  } catch {
+    return '';
+  }
+
+  const requestDir = pathname ? path.posix.dirname(pathname) : '';
+  if (!requestDir) {
+    return '';
+  }
+
+  const relativeFilePath = path.relative(projectRoot, filePath).replace(/\\/g, '/');
+  if (!relativeFilePath || relativeFilePath.startsWith('..')) {
+    return '';
+  }
+
+  const relativeFileDir = path.posix.dirname(relativeFilePath);
+  if (!relativeFileDir || relativeFileDir === '.') {
+    return requestDir;
+  }
+
+  const suffix = `/${relativeFileDir}`;
+  if (requestDir.endsWith(suffix)) {
+    return requestDir.slice(0, -suffix.length) || '';
+  }
+
+  return '';
+}
+
 function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined, provider: ProviderInfo): string {
   const prefix = `${provider.jsxImportSource}/`;
   if (!specifier.startsWith(prefix)) {
@@ -375,15 +410,6 @@ function buildProviderBrowserUrl(specifier: string, httpPort: number | undefined
     ? `${normalizedBase}/${browserPath}`
     : browserPath;
   return `http://127.0.0.1:${httpPort}/${requestRelativePath.replace(/^\/+/, '')}`;
-}
-
-function getPreviewPathDebugSummary(): string {
-  const livePreview = (globalThis as any).__livePreview as { requestPath?: string; filePath?: string; projectRoot?: string } | undefined;
-  const requestPath = typeof livePreview?.requestPath === 'string' ? livePreview.requestPath.replace(/\\/g, '/') : '';
-  const filePath = typeof livePreview?.filePath === 'string' ? livePreview.filePath.replace(/\\/g, '/') : '';
-  const projectRoot = typeof livePreview?.projectRoot === 'string' ? livePreview.projectRoot.replace(/\\/g, '/') : '';
-  const packageBase = getPreviewPackageRequestDir();
-  return `rq=${requestPath || '-'}|fp=${filePath || '-'}|pr=${projectRoot || '-'}|pb=${packageBase || '-'}`;
 }
 
 function rewriteProviderImportsForBrowser(source: string, httpPort: number | undefined, provider: ProviderInfo): string {
@@ -942,6 +968,8 @@ async function buildInlinePreviewHtml({
   const runtimeBase = typeof httpPort === 'number' && Number.isFinite(httpPort)
     ? `http://127.0.0.1:${httpPort}`
     : '';
+  const runtimePackageDir = getPreviewPackageRequestDir()
+    || buildPackageRequestDirFromPageUrl(filePath, provider.projectRoot, `${runtimeBase}/${path.relative(provider.projectRoot, filePath).replace(/\\/g, '/').replace(/^\/+/, '')}`);
   const shellLayout = isShellPageParentEntry(sourceText)
     ? await readShellPageLayoutFields(filePath)
     : undefined;
@@ -954,12 +982,12 @@ async function buildInlinePreviewHtml({
     .join('\n');
 
   return renderShellPageParentDocument({
-    title: `${shellLayout?.title || `${provider.jsxImportSource} TSX Preview`} [runner:1.0.34-pathfix ${getPreviewPathDebugSummary()}]`,
+    title: shellLayout?.title || `${provider.jsxImportSource} TSX Preview`,
     importMap: {
-      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxRuntime).href,
-      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-dev-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxDevRuntime).href,
-      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/core/components/components`, httpPort, provider) : pathToFileURL(provider.resolved.components).href,
-      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/core/util/client-bootstrap`, httpPort, provider) : pathToFileURL(provider.resolved.clientBootstrap).href,
+      [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-runtime`, httpPort, { ...provider, projectRoot: runtimePackageDir || provider.projectRoot }) : pathToFileURL(provider.resolved.jsxRuntime).href,
+      [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-dev-runtime`, httpPort, { ...provider, projectRoot: runtimePackageDir || provider.projectRoot }) : pathToFileURL(provider.resolved.jsxDevRuntime).href,
+      [`${provider.jsxImportSource}/core/components/components`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/core/components/components`, httpPort, { ...provider, projectRoot: runtimePackageDir || provider.projectRoot }) : pathToFileURL(provider.resolved.components).href,
+      [`${provider.jsxImportSource}/core/util/client-bootstrap`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/core/util/client-bootstrap`, httpPort, { ...provider, projectRoot: runtimePackageDir || provider.projectRoot }) : pathToFileURL(provider.resolved.clientBootstrap).href,
     },
     shellSrc: '',
     shellScriptHtml: `<script type="module">\nimport ${JSON.stringify(autoMountEntryUrl)};\n</script>`,
