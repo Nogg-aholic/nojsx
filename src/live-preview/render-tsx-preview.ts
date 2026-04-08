@@ -942,7 +942,7 @@ async function buildInlinePreviewHtml({
     .join('\n');
 
   return renderShellPageParentDocument({
-    title: shellLayout?.title || `${provider.jsxImportSource} TSX Preview`,
+    title: `${shellLayout?.title || `${provider.jsxImportSource} TSX Preview`} [runner:1.0.34-pathfix]`,
     importMap: {
       [`${provider.jsxImportSource}/jsx-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxRuntime).href,
       [`${provider.jsxImportSource}/jsx-dev-runtime`]: runtimeBase ? buildProviderBrowserUrl(`${provider.jsxImportSource}/jsx-dev-runtime`, httpPort, provider) : pathToFileURL(provider.resolved.jsxDevRuntime).href,
