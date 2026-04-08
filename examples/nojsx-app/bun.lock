@@ -135,7 +135,7 @@
 
     "node-addon-api": ["node-addon-api@7.1.1", "", {}, "sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ=="],
 
-    "nojsx": ["nojsx@../../nojsx.tgz", { "dependencies": { "@tailwindcss/cli": "^4.2.2", "@tailwindcss/forms": "^0.5.11", "tailwindcss": "^4.2.2" }, "bin": { "nojsx-build-css": "./dist/scripts/build-tailwind.js", "nojsx-generate-component-loaders": "./dist/scripts/generate-component-loaders.js" } }, "sha512-GtfKXp1Ld2j6Dam3BPn+2c9MYZ/tdn/Hl4T1yTD3rwZmZnCzFOHo5MySe0qfrCUIJ6FUI3ppegQx6dJyXiL4Gw=="],
+    "nojsx": ["nojsx@../../nojsx.tgz", { "dependencies": { "@tailwindcss/cli": "^4.2.2", "@tailwindcss/forms": "^0.5.11", "tailwindcss": "^4.2.2" }, "bin": { "nojsx-build-css": "./dist/scripts/build-tailwind.js", "nojsx-generate-component-loaders": "./dist/scripts/generate-component-loaders.js" } }, "sha512-hpavp+Qt+7bb6eF/R+4fd4Bsglyn+SEtsiialNwkpu0sQgvfUdjkhLprbSo0LajbyxNkYtFUwsGElrsDgtCVSw=="],
 
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 
@@ -157,7 +157,7 @@
 
     "@tailwindcss/oxide-wasm32-wasi/@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.1", "", { "dependencies": { "tslib": "^2.4.0" }, "bundled": true }, "sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w=="],
 
-    "@tailwindcss/oxide-wasm32-wasi/@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.2", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" }, "bundled": true }, "sha512-sNXv5oLJ7ob93xkZ1XnxisYhGYXfaG9f65/ZgYuAu3qt7b3NadcOEhLvx28hv31PgX8SZJRYrAIPQilQmFpLVw=="],
+    "@tailwindcss/oxide-wasm32-wasi/@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.3", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" }, "bundled": true }, "sha512-xK9sGVbJWYb08+mTJt3/YV24WxvxpXcXtP6B172paPZ+Ts69Re9dAr7lKwJoeIx8OoeuimEiRZ7umkiUVClmmQ=="],
 
     "@tailwindcss/oxide-wasm32-wasi/@tybys/wasm-util": ["@tybys/wasm-util@0.10.1", "", { "dependencies": { "tslib": "^2.4.0" }, "bundled": true }, "sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg=="],
 

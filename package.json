@@ -1,6 +1,6 @@
 {
 	"name": "nojsx",
-	"version": "1.0.24",
+	"version": "1.0.34",
 	"type": "module",
 	"scripts": {
 		"clean:dist": "bun scripts/clean-dist.ts",
