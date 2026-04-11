@@ -18,8 +18,15 @@ export type ShellLayoutFields = {
 export type GeneratedPageModule = {
   fileName: string;
   exportName: string;
+	baseExportName: string;
   routePath: string;
   importPath: string;
+};
+
+type GeneratedComponentModule = {
+	fileName: string;
+	exportName: string;
+	importPath: string;
 };
 
 function stripOuterParens(text: string): string {
@@ -114,6 +121,12 @@ export function toExportNameFromPageFile(fileName: string): string {
   return pascal.endsWith('Page') ? pascal : `${pascal}Page`;
 }
 
+export function toRoutePathFromPageFile(fileName: string): string {
+  const base = fileName.replace(/\.(tsx|ts)$/i, '').trim().toLowerCase();
+  if (!base || base === 'home') return '/home';
+  return `/${base}`;
+}
+
 export function toRoutePathFromExportName(exportName: string): string {
   const base = exportName.replace(/Page$/, '');
   const kebab = base
@@ -121,6 +134,29 @@ export function toRoutePathFromExportName(exportName: string): string {
     .toLowerCase();
   if (kebab === 'home') return '/home';
   return `/${kebab || 'home'}`;
+}
+
+async function resolveExportNameFromSourceFile(filePath: string, fallbackFileName: string): Promise<string> {
+  const sourceText = await readFile(filePath, 'utf8');
+  const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let preferred: string | undefined;
+
+  const visit = (node: ts.Node) => {
+    if (preferred) return;
+
+    if ((ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node)) && node.name?.text) {
+      const isExported = node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+      if (isExported && node.name.text.endsWith('Page')) {
+        preferred = node.name.text;
+        return;
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return preferred ?? toExportNameFromPageFile(fallbackFileName);
 }
 
 export async function discoverPageSourceFiles(filePath: string, findNearestPackageRoot: (filePath: string) => string): Promise<string[]> {
@@ -138,6 +174,7 @@ export async function discoverPageSourceFiles(filePath: string, findNearestPacka
 export async function buildGeneratedLoadersModule(options: {
   filePath?: string;
   pagesDir?: string;
+  shellPagePath?: string;
   findNearestPackageRoot?: (filePath: string) => string;
   sourceRoot?: string;
   importPathPrefix?: string;
@@ -168,24 +205,71 @@ export async function buildGeneratedLoadersModule(options: {
   }
 
   const importPathPrefix = options.importPathPrefix ?? 'src/';
-  const pages: GeneratedPageModule[] = files.map((pageFile) => {
+  const pages: GeneratedPageModule[] = await Promise.all(files.map(async (pageFile) => {
     const absPath = path.join(pagesDir, pageFile);
     const relFromSrc = path.relative(sourceRoot, absPath).replace(/\\/g, '/').replace(/\.(tsx|ts)$/i, '');
-    const exportName = toExportNameFromPageFile(pageFile);
+    const exportName = await resolveExportNameFromSourceFile(absPath, pageFile);
+    const baseExportName = exportName.replace(/Page$/, '') || exportName;
     return {
       fileName: pageFile,
       exportName,
-      routePath: toRoutePathFromExportName(exportName),
+      baseExportName,
+      routePath: toRoutePathFromPageFile(pageFile),
       importPath: `${importPathPrefix}${relFromSrc}`,
     };
-  });
+  }));
 
-  const importLines = pages.map((page, index) => `import * as M${index} from ${JSON.stringify(page.importPath)};`);
-  const loaderLines = pages.flatMap((page, index) => [
-    `if (M${index} && M${index}[${JSON.stringify(page.exportName)}]) {`,
-    `  __g.__nojsxComponentLoaders[${JSON.stringify(page.exportName)}] = (props) => new M${index}[${JSON.stringify(page.exportName)}](props);`,
-    '}',
-  ]);
+  const componentsDir = path.join(sourceRoot, 'components');
+  const componentModules: GeneratedComponentModule[] = existsSync(componentsDir)
+    ? (await readdir(componentsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && /\.(tsx|ts)$/i.test(entry.name))
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b))
+      .map((componentFile) => {
+        const absPath = path.join(componentsDir, componentFile);
+        const relFromSrc = path.relative(sourceRoot, absPath).replace(/\\/g, '/').replace(/\.(tsx|ts)$/i, '');
+        return {
+          fileName: componentFile,
+          exportName: toExportNameFromPageFile(componentFile).replace(/Page$/, ''),
+          importPath: `${importPathPrefix}${relFromSrc}`,
+        };
+      })
+    : [];
+
+  const shellPagePath = options.shellPagePath
+    ?? (options.filePath && options.findNearestPackageRoot
+      ? path.join(options.findNearestPackageRoot(options.filePath), 'src', 'app.tsx')
+      : undefined);
+  const shellModules: Array<{ importPath: string; exportName: string }> = [];
+  if (shellPagePath && existsSync(shellPagePath)) {
+    const relFromSrc = path.relative(sourceRoot, shellPagePath).replace(/\\/g, '/').replace(/\.(tsx|ts)$/i, '');
+    shellModules.push({
+      importPath: `${importPathPrefix}${relFromSrc}`,
+      exportName: 'default',
+    });
+  }
+
+  const modules = [
+    ...shellModules.map((shell) => ({ importPath: shell.importPath, exportName: shell.exportName, aliasExportName: 'ShellPage' })),
+    ...pages.map((page) => ({ importPath: page.importPath, exportName: page.exportName, aliasExportName: page.baseExportName })),
+    ...componentModules.map((component) => ({ importPath: component.importPath, exportName: component.exportName })),
+  ];
+
+  const importLines = modules.map((mod, index) => `import * as M${index} from ${JSON.stringify(mod.importPath)};`);
+  const loaderLines = modules.flatMap((mod, index) => {
+    const ctorExpr = mod.exportName === 'default'
+      ? `M${index}.default`
+      : `M${index}[${JSON.stringify(mod.exportName)}]`;
+    const lines = [
+      `if (M${index} && ${ctorExpr}) {`,
+      `  __g.__nojsxComponentLoaders[${JSON.stringify(mod.exportName)}] = (props) => new ${ctorExpr}(props);`,
+    ];
+    if ('aliasExportName' in mod && typeof mod.aliasExportName === 'string' && mod.aliasExportName.length > 0 && mod.aliasExportName !== mod.exportName) {
+      lines.push(`  __g.__nojsxComponentLoaders[${JSON.stringify(mod.aliasExportName)}] = (props) => new ${ctorExpr}(props);`);
+    }
+    lines.push('}');
+    return lines;
+  });
   const routeLines = pages.map((page) => `  ${JSON.stringify(page.routePath)}: { componentName: ${JSON.stringify(page.exportName)} },`);
   const pagesLines = pages.map((page) => `  ${JSON.stringify(page.exportName)}: ${JSON.stringify(page.routePath)},`);
 

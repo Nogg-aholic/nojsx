@@ -1,6 +1,6 @@
 {
 	"name": "nojsx",
-	"version": "1.0.34",
+	"version": "1.0.99",
 	"type": "module",
 	"scripts": {
 		"clean:dist": "bun scripts/clean-dist.ts",
@@ -24,6 +24,9 @@
 			"import": "./dist/jsx-runtime.js"
 		},
 		"./live-preview-runner": "./dist/live-preview/render-tsx-preview.js",
+		"./live-preview/build-shell-entry-preview": {
+			"import": "./dist/live-preview/build-shell-entry-preview.js"
+		},
 		"./jsx-runtime": {
 			"types": "./dist/jsx-runtime.d.ts",
 			"import": "./dist/jsx-runtime.js"
@@ -40,6 +43,10 @@
 		"./core/*": {
 			"types": "./dist/core/*.d.ts",
 			"import": "./dist/core/*.js"
+		},
+		"./core/transport/server/upstream-host-openapi": {
+			"types": "./dist/core/transport/server/upstream-host-openapi.d.ts",
+			"import": "./dist/core/transport/server/upstream-host-openapi.js"
 		}
 	},
 	"files": [

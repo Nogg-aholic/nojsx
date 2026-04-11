@@ -70,6 +70,9 @@ function responseHeaders(contentTypeValue: string): HeadersInit {
 	return {
 		"content-type": contentTypeValue,
 		"cache-control": "no-cache",
+		"access-control-allow-origin": "*",
+		"access-control-allow-methods": "GET, POST, OPTIONS",
+		"access-control-allow-headers": "*",
 	};
 }
 
@@ -145,6 +148,18 @@ const server = Bun.serve({
 	async fetch(request: Request) {
 		const requestUrl = new URL(request.url);
 
+		if (request.method === "OPTIONS") {
+			return new Response(null, {
+				status: 204,
+				headers: {
+					"access-control-allow-origin": "*",
+					"access-control-allow-methods": "GET, POST, OPTIONS",
+					"access-control-allow-headers": "*",
+					"access-control-max-age": "86400",
+				},
+			});
+		}
+
 		if (requestUrl.pathname === "/__nojsx_live_reload") {
 			const stream = new TransformStream<string, Uint8Array>({
 				transform(chunk, controller) {
@@ -167,6 +182,9 @@ const server = Bun.serve({
 				headers: {
 					"content-type": "text/event-stream; charset=utf-8",
 					"cache-control": "no-cache, no-store, must-revalidate",
+					"access-control-allow-origin": "*",
+					"access-control-allow-methods": "GET, POST, OPTIONS",
+					"access-control-allow-headers": "*",
 					connection: "keep-alive",
 					"x-accel-buffering": "no",
 				},
@@ -178,7 +196,14 @@ const server = Bun.serve({
 			const version = Number(payload?.version ?? 0) || Date.now();
 			await Bun.write(liveReloadStampPath, JSON.stringify({ version }));
 			broadcastLiveReload(version);
-			return Response.json({ ok: true, version }, { headers: { "cache-control": "no-cache" } });
+			return Response.json({ ok: true, version }, {
+				headers: {
+					"cache-control": "no-cache",
+					"access-control-allow-origin": "*",
+					"access-control-allow-methods": "GET, POST, OPTIONS",
+					"access-control-allow-headers": "*",
+				},
+			});
 		}
 
 		await ensurePrepared(requestUrl.origin);

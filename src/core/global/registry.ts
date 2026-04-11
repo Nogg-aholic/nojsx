@@ -1,22 +1,87 @@
 // Component Registry
 
 import { NComponent } from '../components/components.js';
+import {
+    requestUpstreamHostOpenApiDocument,
+    requestUpstreamHostOpenApiScalarHtml,
+} from '../transport/server/upstream-host-openapi.js';
 
 
 export const nojsxComponentLoaders: Record<string, (props?: any) => NComponent> = {};
-export const staticRpcHandlers: Map<string, Function> = new Map();
+export const functionToMethodName: WeakMap<Function, { componentId: string; methodName: string }> = new WeakMap();
 
 export type nojsxGlobals = {
     __nojsxComponentLoaders?: Record<string, (props?: any) => NComponent>;
 	__currentComponentId?: string | null;
-	__nojsxStaticRpc?: Map<string, Function>;
+    __functionToMethodName?: WeakMap<Function, { componentId: string; methodName: string }>;
+    __nojsxHostRpcProxyCache?: Map<string, unknown>;
+    vscode?: unknown;
+    getDocs?: ((symbolOrReference: { __nojsxRpcName?: string }) => Promise<unknown>) & { __nojsxRpcName?: string };
+    getDocsHtml?: ((symbolOrReference: { __nojsxRpcName?: string }) => Promise<string>) & { __nojsxRpcName?: string };
+    __nojsxRpcPending?: Map<number, { resolve: (value: unknown) => void; reject: (reason?: unknown) => void }>;
+    __nojsxRpcNextId?: number;
+    __nojsxServerComponentMeta?: Map<string, { parentId: string | null; componentName: string; componentKey?: string }>;
 };
+
+function createHostRpcProxy(pathParts: string[] = []): unknown {
+    const globals = globalThis as unknown as nojsxGlobals;
+    globals.__nojsxHostRpcProxyCache = globals.__nojsxHostRpcProxyCache ?? new Map<string, unknown>();
+    const cacheKey = pathParts.join('.');
+    if (globals.__nojsxHostRpcProxyCache.has(cacheKey)) {
+        return globals.__nojsxHostRpcProxyCache.get(cacheKey);
+    }
+
+    const proxy = new Proxy(function () {}, {
+        get(_target, property) {
+            if (property === '__nojsxRpcName') {
+                return cacheKey;
+            }
+            if (property === 'then' && cacheKey.length === 0) {
+                return undefined;
+            }
+            if (typeof property === 'symbol') {
+                return undefined;
+            }
+            return createHostRpcProxy([...pathParts, String(property)]);
+        },
+        apply() {
+            throw new Error(`Host RPC reference ${cacheKey || '<root>'} cannot be invoked directly. Use callHostAsync().`);
+        },
+    });
+
+    globals.__nojsxHostRpcProxyCache.set(cacheKey, proxy);
+    return proxy;
+}
+
+function createGlobalRpcShim<TArgs extends unknown[], TResult>(methodName: string): ((...args: TArgs) => Promise<TResult>) & { __nojsxRpcName?: string } {
+    const shim = (async (...args: TArgs): Promise<TResult> => {
+        if (typeof window === 'undefined') {
+            if (methodName === 'getDocs') {
+                return requestUpstreamHostOpenApiDocument(args[0] as { __nojsxRpcName?: string }) as Promise<TResult>;
+            }
+            if (methodName === 'getDocsHtml') {
+                return requestUpstreamHostOpenApiScalarHtml(args[0] as { __nojsxRpcName?: string }) as Promise<TResult>;
+            }
+            throw new Error(`Unknown global RPC shim: ${methodName}`);
+        }
+        throw new Error(`${methodName} cannot be invoked directly on the client. Use this.callOnServerAsync().`);
+    }) as ((...args: TArgs) => Promise<TResult>) & { __nojsxRpcName?: string };
+    shim.__nojsxRpcName = methodName;
+    return shim;
+}
 
 // Intrinsic renderers are registered by external packages (e.g. UI components).
 // This package no longer hard-depends on a local components folder.
 if (typeof globalThis !== 'undefined') {
 	(globalThis as unknown as nojsxGlobals).__nojsxComponentLoaders = nojsxComponentLoaders;
-    (globalThis as unknown as nojsxGlobals).__nojsxStaticRpc = (globalThis as unknown as nojsxGlobals).__nojsxStaticRpc ?? staticRpcHandlers;
+    (globalThis as unknown as nojsxGlobals).__functionToMethodName = functionToMethodName;
+    (globalThis as unknown as nojsxGlobals).__nojsxHostRpcProxyCache = (globalThis as unknown as nojsxGlobals).__nojsxHostRpcProxyCache ?? new Map();
+    (globalThis as unknown as nojsxGlobals).vscode = (globalThis as unknown as nojsxGlobals).vscode ?? createHostRpcProxy(['vscode']);
+    (globalThis as unknown as nojsxGlobals).getDocs = (globalThis as unknown as nojsxGlobals).getDocs ?? createGlobalRpcShim('getDocs');
+    (globalThis as unknown as nojsxGlobals).getDocsHtml = (globalThis as unknown as nojsxGlobals).getDocsHtml ?? createGlobalRpcShim('getDocsHtml');
+    (globalThis as unknown as nojsxGlobals).__nojsxRpcPending = (globalThis as unknown as nojsxGlobals).__nojsxRpcPending ?? new Map();
+    (globalThis as unknown as nojsxGlobals).__nojsxRpcNextId = (globalThis as unknown as nojsxGlobals).__nojsxRpcNextId ?? 1;
+    (globalThis as unknown as nojsxGlobals).__nojsxServerComponentMeta = (globalThis as unknown as nojsxGlobals).__nojsxServerComponentMeta ?? new Map();
     
 }
 

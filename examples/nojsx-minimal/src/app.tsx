@@ -1,6 +1,7 @@
 /** @jsxImportSource nojsx */
-import { ShellPageParent } from "nojsx/core/components/shell-page-parent";
+import { ShellPageParent, type ShellPageParentProps } from "nojsx/core/components/shell-page-parent";
 import { NavOutlet } from "nojsx/core/components/nav-outlet";
+import { LivePreviewHandshakeCard } from "./components/live-preview-handshake-card";
 import { ShellNav } from "./components/shell-nav";
 
 export default class ShellPage extends ShellPageParent {
@@ -9,7 +10,7 @@ export default class ShellPage extends ShellPageParent {
 	static layout_appHostId = "info";
 	static layout_bodyClass = "bg-[#0b0f19] text-slate-100 antialiased";
 
-	constructor(props?: any) {
+	constructor(props?: ShellPageParentProps) {
 		super({ ...props });
 	}
 
@@ -27,6 +28,10 @@ export default class ShellPage extends ShellPageParent {
 						<span class="text-xs font-medium text-slate-400">shell alive</span>
 					</div>
 				</header>
+
+				<div class="mb-6 rounded-2xl border border-white/10 bg-[#101726] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.28)]">
+					<LivePreviewHandshakeCard />
+				</div>
 
 				<div class="mb-6 rounded-2xl border border-white/10 bg-[#101726] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.28)]">
 					<div class="flex items-center justify-between gap-4 border-b border-white/8 pb-4">

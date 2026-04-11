@@ -9,6 +9,8 @@ import { buildGeneratedLoadersModule, readShellPageLayoutFields } from '../live-
 export type BuildNojsxAppDevOptions = {
   appRoot: string;
   origin: string;
+  websocketUrl?: string;
+  upstreamHostRpcEndpoint?: string;
   jsxImportSource?: string;
   appHostId?: string;
   shellPagePath?: string;
@@ -24,6 +26,9 @@ function buildLiveReloadScript(origin: string): string {
     '(() => {',
     '  const g = globalThis;',
     `  const endpoint = ${JSON.stringify(`${origin}/__nojsx_live_reload`)};`,
+    '  const href = String(globalThis.location?.href ?? "").toLowerCase();',
+    '  const protocol = String(globalThis.location?.protocol ?? "").toLowerCase();',
+    "  const isWebview = protocol === 'vscode-webview:' || protocol === 'vscode-file:' || href.includes('purpose=webviewview') || href.includes('vscode-resource-base-authority=') || href.includes('parentorigin=vscode-file');",
     "  const scrollKey = '__nojsx_live_reload_scroll';",
     '  if (g.__nojsxLiveReloadSource) {',
     '    g.__nojsxLiveReloadSource.close();',
@@ -116,7 +121,9 @@ function buildLiveReloadScript(origin: string): string {
     '  }',
     "  window.addEventListener('scroll', schedulePersistScroll, { passive: true });",
     '  restoreScroll();',
-    '  connect();',
+    '  if (!isWebview) {',
+    '    connect();',
+    '  }',
     "  window.addEventListener('beforeunload', () => {",
     '    if (scrollPersistTimer) {',
     '      clearTimeout(scrollPersistTimer);',
@@ -191,7 +198,12 @@ async function buildCssForDev(stylesEntry: string, outputPath: string, srcRoot: 
   ], repoRoot);
 }
 
-async function transpileTsModuleToFile(sourcePath: string, outPath: string, jsxImportSource: string): Promise<void> {
+async function transpileTsModuleToFile(
+  sourcePath: string,
+  outPath: string,
+  jsxImportSource: string,
+  devNojsxRoot?: string,
+): Promise<void> {
   const source = await readFile(sourcePath, 'utf8');
   const result = ts.transpileModule(source, {
     compilerOptions: {
@@ -206,7 +218,12 @@ async function transpileTsModuleToFile(sourcePath: string, outPath: string, jsxI
   if (typeof result.outputText !== 'string') {
     throw new Error(`[nojsx:dev-build] TypeScript transpile produced no output for ${sourcePath}`);
   }
-  await Bun.write(outPath, result.outputText);
+  let outputText = result.outputText;
+  if (devNojsxRoot) {
+    const relativeNojsxRoot = path.relative(path.dirname(outPath), devNojsxRoot).replace(/\\/g, '/');
+    outputText = outputText.replace(/(["'])nojsx\//g, `$1${relativeNojsxRoot}/`);
+  }
+  await Bun.write(outPath, outputText);
 }
 
 async function ensureParentDir(filePath: string): Promise<void> {
@@ -242,7 +259,7 @@ async function transpileNojsxSourceIntoDevRoot(repoRoot: string, devNojsxRoot: s
     await ensureParentDir(targetPath);
 
     if (/\.(ts|tsx)$/i.test(relativePath)) {
-      await transpileTsModuleToFile(sourcePath, targetPath, 'nojsx');
+      await transpileTsModuleToFile(sourcePath, targetPath, 'nojsx', devNojsxRoot);
       continue;
     }
 
@@ -253,6 +270,20 @@ async function transpileNojsxSourceIntoDevRoot(repoRoot: string, devNojsxRoot: s
 export async function buildNojsxAppDev(options: BuildNojsxAppDevOptions): Promise<{ devRoot: string }> {
   const appRoot = path.resolve(options.appRoot);
   const origin = options.origin;
+  const websocketUrl = options.websocketUrl
+    ?? (() => {
+      try {
+        const url = new URL(origin);
+        url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        url.pathname = '/ws';
+        url.search = '';
+        url.hash = '';
+        return url.toString();
+      } catch {
+        return undefined;
+      }
+    })();
+  const upstreamHostRpcEndpoint = options.upstreamHostRpcEndpoint;
   const jsxImportSource = options.jsxImportSource ?? 'nojsx';
   const repoRoot = resolvePackageRoot(appRoot);
   const srcRoot = path.join(appRoot, 'src');
@@ -282,14 +313,20 @@ export async function buildNojsxAppDev(options: BuildNojsxAppDevOptions): Promis
       'nojsx/core/global/registry': `${origin}/nojsx/core/global/registry.js`,
     },
     cspNonce: shellLayout.cspNonce,
-    cspContent: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';",
+    cspContent: "default-src 'self' data: blob: vscode-webview: vscode-file: http: https: ws: wss:; script-src 'self' 'unsafe-eval' 'unsafe-inline' data: blob: vscode-webview: vscode-file: http: https:; style-src 'self' 'unsafe-inline' data: blob: vscode-webview: vscode-file: https://fonts.googleapis.com http: https:; font-src 'self' data: blob: vscode-webview: vscode-file: https://fonts.gstatic.com http: https:; img-src 'self' data: blob: vscode-webview: vscode-file: http: https:; connect-src 'self' data: blob: vscode-webview: vscode-file: http: https: ws: wss:;",
     shellScriptHtml: `<script type="module" src="${origin}/src/main.js"></script>`,
     appHostId: shellLayout.appHostId,
     headExtraHtml: `${shellLayout.headHtml}\n<link rel="stylesheet" href="${origin}/src/styles/app.css" />`,
     bodyClass: shellLayout.bodyClass,
     headerAttributes: shellLayout.headerAttributes,
     bodyBeforeShellHtml: shellLayout.headerHtml,
-    bodyAfterShellHtml: [shellLayout.footerHtml, shellLayout.scriptsHtml, liveReloadScript].filter(Boolean).join('\n'),
+    bodyAfterShellHtml: [
+      shellLayout.footerHtml,
+      upstreamHostRpcEndpoint ? `<script>globalThis.__nojsxUpstreamHostRpcEndpoint = ${JSON.stringify(upstreamHostRpcEndpoint)};</script>` : '',
+      websocketUrl ? `<script>globalThis.__nojsxWebSocketUrl = ${JSON.stringify(websocketUrl)};</script>` : '',
+      shellLayout.scriptsHtml,
+      liveReloadScript,
+    ].filter(Boolean).join('\n'),
   });
 
   await ensureParentDir(devHtmlPath);
@@ -308,7 +345,7 @@ export async function buildNojsxAppDev(options: BuildNojsxAppDevOptions): Promis
     if (/\.(ts|tsx)$/i.test(relativePath)) {
       const outPath = toDevJsPath(srcRoot, devSrcRoot, sourcePath);
       await ensureParentDir(outPath);
-      await transpileTsModuleToFile(sourcePath, outPath, jsxImportSource);
+      await transpileTsModuleToFile(sourcePath, outPath, jsxImportSource, devNojsxRoot);
     }
   }
 
@@ -319,9 +356,10 @@ export async function buildNojsxAppDev(options: BuildNojsxAppDevOptions): Promis
 
   const loaders = await buildGeneratedLoadersModule({
     pagesDir: pagesRoot,
+    shellPagePath,
     sourceRoot: path.dirname(pagesRoot),
     importPathPrefix: './',
-    jsxImportSource,
+    jsxImportSource: '../nojsx',
   });
   await ensureParentDir(devLoadersPath);
   await Bun.write(devLoadersPath, loaders?.code ?? '');

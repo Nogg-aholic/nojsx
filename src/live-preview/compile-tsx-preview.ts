@@ -4,8 +4,10 @@ import process from 'node:process';
 import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { discoverPageSourceFiles, discoverPagesDirectory } from './shell-page-shared.js';
+import { appendLivePreviewDebugLog } from './debug-log.js';
 
 type PreviewCompilerCacheEntry = {
   key: string;
@@ -34,6 +36,75 @@ function normalizeServerSessionId(value: unknown): string {
   return trimmed || 'default';
 }
 
+function resolveProviderPackageRoot(projectRoot: string, jsxImportSource: string): string | undefined {
+  try {
+    const resolver = createRequire(path.join(projectRoot, 'package.json'));
+    const providerPackageJsonPath = resolver.resolve(`${jsxImportSource}/package.json`);
+    return path.dirname(providerPackageJsonPath);
+  } catch {
+    return undefined;
+  }
+}
+
+function mergeUniqueStrings(...groups: Array<readonly string[] | undefined>): string[] | undefined {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    if (!group) continue;
+    for (const entry of group) {
+      if (typeof entry !== 'string' || !entry.trim()) continue;
+      if (seen.has(entry)) continue;
+      seen.add(entry);
+      out.push(entry);
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+  function resolveProviderSubpathFile(providerPackageRoot: string, subpath: string): string | undefined {
+    const normalized = subpath.replace(/^\.\//, '').replace(/\\/g, '/');
+    const candidates = normalized.endsWith('.js') || normalized.endsWith('.d.ts')
+      ? [normalized]
+      : [
+          `${normalized}.ts`,
+          `${normalized}.tsx`,
+          `${normalized}.d.ts`,
+          `${normalized}.js`,
+          `${normalized}/index.ts`,
+          `${normalized}/index.tsx`,
+          `${normalized}/index.d.ts`,
+          `${normalized}/index.js`,
+        ];
+
+    for (const candidate of candidates) {
+      const fullPath = path.resolve(providerPackageRoot, candidate);
+      if (existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+    return undefined;
+  }
+
+  function resolveProviderModuleSpecifier(projectRoot: string, jsxImportSource: string, specifier: string): string | undefined {
+    const prefix = `${jsxImportSource}/`;
+    if (specifier !== jsxImportSource && !specifier.startsWith(prefix)) {
+      return undefined;
+    }
+
+    const providerPackageRoot = resolveProviderPackageRoot(projectRoot, jsxImportSource);
+    if (!providerPackageRoot) {
+      return undefined;
+    }
+
+    if (specifier === jsxImportSource) {
+      return resolveProviderSubpathFile(providerPackageRoot, 'dist/jsx-runtime')
+        ?? resolveProviderSubpathFile(providerPackageRoot, 'src/jsx-runtime');
+    }
+
+    const subpath = specifier.slice(prefix.length);
+    return resolveProviderSubpathFile(providerPackageRoot, `dist/${subpath}`)
+      ?? resolveProviderSubpathFile(providerPackageRoot, `src/${subpath}`);
+  }
 function toPathSegment(value: string): string {
   return value
     .replace(/[^a-zA-Z0-9._-]+/g, '_')
@@ -211,6 +282,8 @@ async function createOrRefreshCompilerCacheEntry(params: {
   rootNames: string[];
   filePath: string;
   sourceText: string;
+  serverSessionId: string;
+  requestPath?: string;
 }): Promise<PreviewCompilerCacheEntry> {
   const normalizedRootNames = [...params.rootNames].map((name) => path.resolve(name)).sort();
   const normalizedFilePath = path.resolve(params.filePath);
@@ -240,6 +313,7 @@ async function createOrRefreshCompilerCacheEntry(params: {
   const originalReadFile = host.readFile.bind(host);
   const originalFileExists = host.fileExists.bind(host);
   const originalGetSourceFile = host.getSourceFile.bind(host);
+  const originalResolveModuleNames = host.resolveModuleNames?.bind(host);
 
   host.readFile = (fileName) => {
     const normalizedName = path.resolve(fileName);
@@ -274,6 +348,32 @@ async function createOrRefreshCompilerCacheEntry(params: {
     return sourceFile;
   };
 
+  host.resolveModuleNames = (moduleNames, containingFile, reusedNames, redirectedReference, options) => {
+    const resolvedByTs = originalResolveModuleNames?.(moduleNames, containingFile, reusedNames, redirectedReference, options);
+    return moduleNames.map((moduleName, index) => {
+      const existing = resolvedByTs?.[index];
+      if (existing) {
+        return existing;
+      }
+
+      const providerResolvedFileName = resolveProviderModuleSpecifier(params.projectRoot, params.compilerOptions.jsxImportSource || 'nojsx', moduleName);
+      if (!providerResolvedFileName) {
+        return ts.resolveModuleName(moduleName, containingFile, options, ts.sys).resolvedModule;
+      }
+
+      void appendLivePreviewDebugLog(params.serverSessionId, 'compile-preview', 'resolve-module-provider-override', {
+        moduleName,
+        containingFile,
+        providerResolvedFileName,
+      }, params.requestPath);
+
+      return {
+        resolvedFileName: providerResolvedFileName,
+        isExternalLibraryImport: true,
+      } as ts.ResolvedModule;
+    });
+  };
+
   const entry: PreviewCompilerCacheEntry = {
     key: params.key,
     tsconfigPath: params.tsconfigPath,
@@ -298,6 +398,7 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
   const sourceText = typeof payload.sourceText === 'string' ? payload.sourceText : String(payload.sourceText || '');
   const outDir = String(payload.outDir || '');
   const serverSessionId = normalizeServerSessionId(payload.serverProcessRef ?? payload.serverSessionId);
+  const requestPath = typeof payload.requestPath === 'string' ? payload.requestPath : undefined;
   const artifactRoot = path.join(os.tmpdir(), 'nojsx-live-preview', 'shared');
 
   if (!filePath || !outDir) {
@@ -306,6 +407,12 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
 
   const projectRoot = findNearestPackageRoot(filePath);
   const tsconfigPath = findNearestTsconfig(path.dirname(filePath));
+  await appendLivePreviewDebugLog(serverSessionId, 'compile-preview', 'start', {
+    filePath,
+    projectRoot,
+    tsconfigPath,
+    outDir,
+  }, requestPath);
   const stableEmitRoot = getStableEmitRoot(artifactRoot, filePath, serverSessionId);
   const tempEmitRoot = outDir;
   const tempEmitRootNormalized = path.resolve(tempEmitRoot).replace(/\\/g, '/');
@@ -349,6 +456,7 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
 
   const jsxImportSource = getEffectiveJsxImportSource(sourceText, parsed.options);
   if (!jsxImportSource) {
+    await appendLivePreviewDebugLog(serverSessionId, 'compile-preview', 'missing-jsx-import-source', { filePath }, requestPath);
     throw new Error(`Preview compile could not determine jsxImportSource for ${filePath}. Add a file-level @jsxImportSource pragma or set compilerOptions.jsxImportSource in the nearest tsconfig.json.`);
   }
 
@@ -359,6 +467,25 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
     outDir: stableEmitRoot,
     jsxImportSource,
   };
+
+  const providerPackageRoot = resolveProviderPackageRoot(projectRoot, jsxImportSource);
+  const providerTypes = providerPackageRoot ? [jsxImportSource] : undefined;
+  const providerTypeRoots = providerPackageRoot
+    ? [path.join(projectRoot, 'node_modules', '@types'), path.join(providerPackageRoot, 'dist'), path.join(providerPackageRoot, 'src')]
+    : undefined;
+
+  compilerOptions.moduleResolution = ts.ModuleResolutionKind.Bundler;
+  compilerOptions.types = mergeUniqueStrings(providerTypes, compilerOptions.types);
+  compilerOptions.typeRoots = mergeUniqueStrings(providerTypeRoots, compilerOptions.typeRoots);
+  await appendLivePreviewDebugLog(serverSessionId, 'compile-preview', 'compiler-options', {
+    jsxImportSource,
+    providerPackageRoot,
+    moduleResolution: compilerOptions.moduleResolution,
+    types: compilerOptions.types,
+    typeRoots: compilerOptions.typeRoots,
+    rootDir: compilerOptions.rootDir,
+    baseUrl: compilerOptions.baseUrl,
+  }, requestPath);
 
   const sourceRootPath = compilerOptions.rootDir
     ? path.resolve(compilerOptions.rootDir)
@@ -386,6 +513,8 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
     rootNames,
     filePath,
     sourceText,
+    serverSessionId,
+    requestPath,
   });
   const host = cacheEntry.host;
   const originalWriteFile = host.writeFile.bind(host);
@@ -443,12 +572,20 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
 
   const diagnostics = ts.getPreEmitDiagnostics(program);
   if (diagnostics.length > 0) {
+    await appendLivePreviewDebugLog(serverSessionId, 'compile-preview', 'pre-emit-diagnostics', {
+      count: diagnostics.length,
+      formatted: formatDiagnostics(diagnostics),
+    }, requestPath);
     throw new Error(formatDiagnostics(diagnostics));
   }
 
   const emitResult = builder.emit();
   const emitDiagnostics = emitResult.diagnostics || [];
   if (emitDiagnostics.length > 0) {
+    await appendLivePreviewDebugLog(serverSessionId, 'compile-preview', 'emit-diagnostics', {
+      count: emitDiagnostics.length,
+      formatted: formatDiagnostics(emitDiagnostics),
+    }, requestPath);
     throw new Error(formatDiagnostics(emitDiagnostics));
   }
 
@@ -463,6 +600,11 @@ export async function compilePreview(payload: any): Promise<{ entryJsPath: strin
   }
 
   emittedJsPath = rewriteStableToRequestPath(emittedJsPath);
+
+  await appendLivePreviewDebugLog(serverSessionId, 'compile-preview', 'success', {
+    entryJsPath: emittedJsPath,
+    moduleMapKeys: Object.keys(emittedModuleMap),
+  }, requestPath);
 
   return {
     entryJsPath: path.resolve(emittedJsPath).replace(/\\/g, '/'),

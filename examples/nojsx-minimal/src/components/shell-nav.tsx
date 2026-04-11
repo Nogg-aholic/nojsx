@@ -1,13 +1,14 @@
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
+import { NComponent, type NComponentProps } from "nojsx/core/components/components";
 import type {} from "nojsx/core/types/index";
 
 export class ShellNav extends NComponent {
-	constructor(props?: any) {
+	constructor(props?: NComponentProps) {
 		super("ShellNav", props);
 	}
 
 	navTo = (path: string) => () => {
+		console.log(path)
 		this.getShell().nav(path);
 	};
 
@@ -18,6 +19,9 @@ export class ShellNav extends NComponent {
 			</button>
 			<button type="button" onclick={this.navTo("/about")} class="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:bg-white/10 hover:text-white">
 				/about
+			</button>
+			<button type="button" onclick={this.navTo("/openapi")} class="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:bg-white/10 hover:text-white">
+				/OpenApiExample
 			</button>
 		</nav>
 	);

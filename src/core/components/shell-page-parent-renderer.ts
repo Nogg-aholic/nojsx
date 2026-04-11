@@ -3,6 +3,9 @@ import type { ShellPageParentProps } from "./shell-page-parent.js";
 export const defaultShellPageParentProviderScripts = [
   `<script>`,
   `(() => {`,
+  `  if (typeof globalThis.tailwind === 'undefined') {`,
+  `    globalThis.tailwind = { config: () => {} };`,
+  `  }`,
   `  const removeDiagnostics = () => {`,
   `    document.getElementById('nojsx-live-preview-diagnostics')?.remove();`,
   `  };`,

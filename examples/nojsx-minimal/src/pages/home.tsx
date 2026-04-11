@@ -1,13 +1,14 @@
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
+import { NComponent, type NComponentProps } from "nojsx/core/components/components";
 import type {} from "nojsx/core/types/index";
 import { DirectHtmlCounter } from "../components/direct-html-counter";
+import { HostProxyDemo } from "../components/host-proxy-demo";
 import { PersistentCounter } from "../components/persistent-counter";
 
-export class Home extends NComponent {
+export class HomePage extends NComponent {
 	clicks = 0;
 
-	constructor(props?: any) {
+	constructor(props?: NComponentProps) {
 		super("Home", props);
 	}
 
@@ -58,13 +59,8 @@ export class Home extends NComponent {
 				></PersistentCounter>
 			</PersistentCounter>
 			<DirectHtmlCounter />
+			<HostProxyDemo />
 		</section>
 	);
 }
 
-export class HomePage extends Home {
-	constructor(props?: any) {
-		super(props);
-		this.name = "HomePage";
-	}
-}

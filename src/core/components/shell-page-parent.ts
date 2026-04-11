@@ -1,4 +1,5 @@
 import { NComponent, NComponentProps } from "./components.js";
+import { nojsxComponentLoaders } from "../global/registry.js";
 import { renderShellPageParentDocument } from "./shell-page-parent-renderer.js";
 
 export interface ShellPageParentDocumentProps {
@@ -31,7 +32,10 @@ export class ShellPageParent extends NComponent {
   private readonly shellProps: ShellPageParentProps;
 
   constructor(props?: ShellPageParentProps) {
-    super("ShellPageParent", props);
+    const inferredName = new.target?.name && new.target.name !== 'ShellPageParent'
+      ? new.target.name
+      : 'ShellPageParent';
+    super(inferredName, props);
     this.shellProps = {
       title: props?.title ?? "App",
       importMap: props?.importMap ?? {},
@@ -62,3 +66,5 @@ export class ShellPageParent extends NComponent {
     return renderShellPageParentDocument(this.shellProps);
   }
 }
+
+nojsxComponentLoaders.ShellPageParent = (props?: any) => new ShellPageParent(props);

@@ -1,12 +1,12 @@
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
+import { NComponent, type NComponentProps } from "nojsx/core/components/components";
 import type {} from "nojsx/core/types/index";
 import { PersistentCounter } from "../components/persistent-counter";
 
-export class About extends NComponent {
+export class AboutPage extends NComponent {
 	clicks = 0;
 
-	constructor(props?: any) {
+	constructor(props?: NComponentProps) {
 		super("About", props);
 	}
 
@@ -44,11 +44,4 @@ export class About extends NComponent {
 			<PersistentCounter></PersistentCounter>
 		</section>
 	);
-}
-
-export class AboutPage extends About {
-	constructor(props?: any) {
-		super(props);
-		this.name = "AboutPage";
-	}
 }

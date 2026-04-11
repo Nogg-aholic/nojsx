@@ -1,5 +1,5 @@
 import { NComponent, NComponentProps } from './components.js';
-import { componentRegistry, type nojsxGlobals } from '../global/registry.js';
+import { componentRegistry, nojsxComponentLoaders, type nojsxGlobals } from '../global/registry.js';
 
 type CurrentPageState = {
 	fullPath: string;
@@ -231,3 +231,5 @@ export class NavOutlet extends NComponent {
 		(globalThis as any).__nojsxNavOutlet = this;
 	};
 }
+
+nojsxComponentLoaders.NavOutlet = (props?: any) => new NavOutlet(props);

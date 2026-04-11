@@ -1,0 +1,334 @@
+import { clearInlineHandlersForComponent, injectAttributes, setRenderContext } from '../../jsx-dev-runtime.js';
+import { extendShellBridge, createGetShellFunctionServer } from '../bridges/get-shell.js';
+import { nContext, componentRegistry, functionToMethodName, type nojsxGlobals } from '../global/registry.js';
+import { refreshClientUiBindings } from '../util/ui-runtime.js';
+
+type RpcArgsFor<T extends (...args: any[]) => any> = Parameters<T> extends [] ? undefined : Parameters<T> extends [infer A] ? A : Parameters<T>;
+
+type ServerLoadHandshakeResponse = {
+	args?: unknown;
+};
+
+type LivePreviewBridgeMessage = {
+	type: 'nojsx:rpc:call-await';
+	requestId: number;
+	componentId: string;
+	methodName: string;
+	args: unknown;
+	meta?: { parentId: string | null; componentName: string; componentKey?: string };
+};
+
+function getLivePreviewBridgeGlobals() {
+	const g = globalThis as unknown as nojsxGlobals & {
+		__nojsxLivePreviewBridge?: { postMessage?: (message: LivePreviewBridgeMessage) => void };
+		__nojsxLoadPending?: Map<string, Promise<void>>;
+	};
+	return g;
+}
+
+function isLivePreviewBridgeEnabled(): boolean {
+	return typeof getLivePreviewBridgeGlobals().__nojsxLivePreviewBridge?.postMessage === 'function';
+}
+
+function postLivePreviewBridgeMessage(message: LivePreviewBridgeMessage): void {
+	getLivePreviewBridgeGlobals().__nojsxLivePreviewBridge?.postMessage?.(message);
+}
+
+async function runClientLoadWrapper(instance: NComponent): Promise<void> {
+	if (typeof window === 'undefined') return;
+	const response = await instance.callOnServerAsync(instance.__nojsxServerLoad, undefined) as ServerLoadHandshakeResponse | null | undefined;
+	if (typeof instance.onLoad === 'function') {
+		await (instance.onLoad as (args: unknown) => unknown).call(instance, response?.args);
+	}
+}
+
+function ensureClientLoadStarted(instance: NComponent): void {
+	if (typeof window === 'undefined') return;
+	const globals = getLivePreviewBridgeGlobals();
+	globals.__nojsxLoadPending = globals.__nojsxLoadPending ?? new Map<string, Promise<void>>();
+	if (globals.__nojsxLoadPending.has(instance.id)) return;
+
+	const pending = runClientLoadWrapper(instance)
+		.then(() => {
+			instance.render();
+			globals.__nojsxLoadPending?.delete(instance.id);
+		})
+		.catch((error) => {
+			globals.__nojsxLoadPending?.delete(instance.id);
+			throw error;
+		});
+
+	globals.__nojsxLoadPending.set(instance.id, pending);
+}
+
+export const isServer = typeof window === 'undefined';
+
+export function wrapHtmlWithRenderContext(fn: () => string): (componentId: string, className?: string) => string {
+	return (componentId: string, className?: string) => {
+		return injectAttributes(fn(), componentId, className);
+	};
+}
+
+export interface NComponentProps extends JSX.HtmlTag {
+	class?: string;
+	__id?: string;
+	__parentId?: string | null;
+	key?: string | number;
+	__key?: string | number;
+}
+
+export abstract class NComponent {
+	abstract html: (() => JSX.Element) | ((componentId: string, className?: string) => JSX.Element);
+	[key: string]: any;
+
+	id!: string;
+	nContext!: nContext;
+	parent!: NComponent | null;
+	children!: NComponent[];
+	__serverHandlers?: Record<string, Function>;
+	getShell = () => {
+		let current: NComponent | null = this;
+		while (current) {
+			if (current.id === 'ShellPage') {
+				return extendShellBridge(current);
+			}
+			current = current.parent;
+		}
+		return extendShellBridge(this);
+	};
+
+	serverLoad?: (args?: any) => any;
+	onLoad?: (args?: any) => any;
+	onUnload?: (args?: any) => any;
+
+	__nojsxServerLoad = (_args?: unknown) => {
+		return typeof this.serverLoad === 'function' ? this.serverLoad(_args) : undefined;
+	};
+
+	callOnServerAsync = <T extends (...args: any[]) => any>(method: T, args?: RpcArgsFor<T>): Promise<Awaited<ReturnType<T>>> => {
+		if (isServer) {
+			return Promise.reject(new Error('callOnServerAsync is only available in the live preview client runtime.'));
+		}
+		if (!isLivePreviewBridgeEnabled()) {
+			return Promise.reject(new Error('Live preview bridge is not available.'));
+		}
+
+		this.__ensureMapped();
+		const globals = globalThis as unknown as nojsxGlobals;
+		const resolved = globals.__functionToMethodName?.get(method as unknown as Function);
+		const methodName = resolved && resolved.componentId === this.id
+			? resolved.methodName
+			: (method as unknown as { __nojsxRpcName?: string })?.__nojsxRpcName;
+
+		if (typeof methodName !== 'string' || methodName.length === 0) {
+			return Promise.reject(new Error('Cannot resolve method to name for callOnServerAsync.'));
+		}
+
+		globals.__nojsxRpcPending = globals.__nojsxRpcPending ?? new Map();
+		globals.__nojsxRpcNextId = (globals.__nojsxRpcNextId ?? 1) >>> 0;
+		const requestId = globals.__nojsxRpcNextId >>> 0;
+		globals.__nojsxRpcNextId = (requestId + 1) >>> 0;
+
+		return new Promise<Awaited<ReturnType<T>>>((resolve, reject) => {
+			globals.__nojsxRpcPending?.set(requestId, {
+				resolve: resolve as (value: unknown) => void,
+				reject,
+			});
+			postLivePreviewBridgeMessage({
+				type: 'nojsx:rpc:call-await',
+				requestId,
+				componentId: this.id,
+				methodName,
+				args: args ?? null,
+				meta: {
+					parentId: this.parent?.id ?? this.props?.__parentId ?? null,
+					componentName: this.nContext.name,
+					componentKey: this.nContext.key || undefined,
+				},
+			});
+		});
+	};
+
+	render = () => {
+		if (isServer) return;
+
+		const el = document.querySelector(`[data-component-id="${this.id}"]`);
+		if (!el) return;
+
+		const currentEntry = componentRegistry.get(this.id);
+		const htmlFn = currentEntry.result.html;
+		if (typeof htmlFn !== 'function') return;
+		const preservedChildElements = new Map<string, Element>();
+		const directChildIds = [...currentEntry.childIds];
+		const descendantIds: string[] = [];
+		for (const [childId, childEntry] of componentRegistry.entries()) {
+			if (childId === this.id) continue;
+			let cursor = childEntry.parentId;
+			while (cursor) {
+				if (cursor === this.id) {
+					descendantIds.push(childId);
+					break;
+				}
+				cursor = componentRegistry.has(cursor) ? componentRegistry.get(cursor).parentId : null;
+			}
+		}
+		for (const childId of descendantIds) {
+			const childEl = document.querySelector(`[data-component-id="${childId}"]`);
+			if (childEl) preservedChildElements.set(childId, childEl);
+		}
+		const before = componentRegistry.getRenderParent();
+		try {
+			componentRegistry.setRenderParent(this.id);
+			componentRegistry.beginPreserveChildren(descendantIds, directChildIds);
+			componentRegistry.prepareChildRender(this.id, currentEntry);
+			const html = this.__renderHtml(this.id, this.props?.class);
+			el.outerHTML = html;
+		} finally {
+			componentRegistry.endPreserveChildren();
+			componentRegistry.setRenderParent(before ?? '');
+		}
+
+		for (const [childId, preservedEl] of preservedChildElements.entries()) {
+			const placeholder = document.querySelector(`[data-component-id="${childId}"]`);
+			if (!placeholder || !placeholder.parentNode) continue;
+			placeholder.parentNode.replaceChild(preservedEl, placeholder);
+		}
+
+		refreshClientUiBindings();
+	};
+
+	updateHtml = (selector: string, html: string) => {
+		if (isServer) return;
+		const el = document.querySelector(selector);
+		if (el) {
+			if (html.trim().startsWith('<')) {
+				el.outerHTML = html;
+			} else {
+				el.innerHTML = html;
+			}
+			refreshClientUiBindings();
+		} else {
+			console.warn(`[WS] updateHtml: element not found for selector: ${selector}`);
+		}
+	};
+
+	public props?: NComponentProps;
+	private __didLoad = false;
+	private __mapped = false;
+
+	private __runOnLoadOnce(): void {
+		if (this.__didLoad || isServer || typeof this.onLoad !== 'function') return;
+		this.__didLoad = true;
+		try {
+			const out = this.onLoad.call(this);
+			if (out && typeof (out as PromiseLike<unknown>).then === 'function') {
+				(out as Promise<unknown>).catch((e) => {
+					console.warn(`[nojsx:onLoad] async onLoad failed for ${this.id}`, e);
+				});
+			}
+		} catch (e) {
+			console.warn(`[nojsx:onLoad] onLoad failed for ${this.id}`, e);
+		}
+	}
+
+	private __ensureMapped(): void {
+		if (this.__mapped) return;
+		this.__mapped = true;
+
+		functionToMethodName.set(this.__nojsxServerLoad, { componentId: this.id, methodName: 'serverLoad' });
+		for (const key of Object.keys(this)) {
+			const value = (this as any)[key];
+			if (typeof value !== 'function') continue;
+			if (key === '__nojsxServerLoad' || key === 'callOnServerAsync' || key === 'render' || key === 'updateHtml' || key === 'getShell') continue;
+			functionToMethodName.set(value, { componentId: this.id, methodName: key });
+		}
+	}
+
+	private __renderHtml(componentId: string, className?: string): string {
+		const original = (this as any).html;
+		if (typeof original !== 'function') {
+			throw new Error(`[NComponent] Missing html() implementation for component ${this.id}`);
+		}
+		clearInlineHandlersForComponent(componentId);
+		const prevRenderParent = componentRegistry.getRenderParent();
+		const prev = setRenderContext(componentId);
+		try {
+			componentRegistry.setRenderParent(componentId);
+			if (original.length === 0) {
+				return injectAttributes(String((original as unknown as () => unknown).call(this)), componentId, className);
+			}
+			return String((original as unknown as (componentId: string, className?: string) => unknown).call(this, componentId, className));
+		} finally {
+			componentRegistry.setRenderParent(prevRenderParent ?? '');
+			setRenderContext(prev);
+		}
+	}
+
+	constructor(name: string, props?: NComponentProps) {
+		const { componentId, instanceKey } = generateIDs(props, name);
+		const ctx: nContext = { name: name, id: componentId, key: instanceKey };
+		this.id = componentId;
+		this.nContext = ctx;
+		this.props = props;
+		this.parent = componentRegistry.getRenderParent() ? componentRegistry.get(componentRegistry.getRenderParent())?.result : null;
+		this.children = [];
+		this.getShell = createGetShellFunctionServer();
+		register(this, ctx);
+	}
+
+	__html(): string {
+		this.__ensureMapped();
+		if (!isServer && isLivePreviewBridgeEnabled()) {
+			ensureClientLoadStarted(this);
+			return injectAttributes('<div></div>', this.id, this.props?.class);
+		}
+		this.__runOnLoadOnce();
+		return this.__renderHtml(this.id, this.props?.class);
+	}
+}
+
+function generateIDs(props: NComponentProps | undefined, name: string) {
+	const parentId = componentRegistry.getRenderParent();
+	const forcedId = props?.__id;
+	const baseId = parentId ? `${parentId}.${name}` : name;
+	const explicitKey = props?.key ?? props?.__key;
+	let instanceKey = '';
+	let suffix = '';
+	if (explicitKey !== undefined && explicitKey !== null && explicitKey !== '') {
+		instanceKey = String(explicitKey);
+		suffix = `:${instanceKey}`;
+	} else {
+		let count = componentRegistry.getRenderParent() === '' ? 0 : componentRegistry.get(componentRegistry.getRenderParent())?.childIds.length;
+		if (count > 0) {
+			instanceKey = String(count - 1);
+			suffix = `#${instanceKey}`;
+		}
+	}
+
+	const componentId = typeof forcedId === 'string' && forcedId.length > 0 ? forcedId : baseId + suffix;
+	if (typeof forcedId === 'string' && forcedId.length > 0 && !instanceKey) {
+		if (forcedId.startsWith(baseId + ':') || forcedId.startsWith(baseId + '#')) {
+			instanceKey = forcedId.slice(baseId.length + 1);
+		}
+	}
+	return { componentId, instanceKey };
+}
+
+function register(instance: NComponent, nContext: nContext) {
+	const componentId = nContext.id;
+	const parentId = componentRegistry.getRenderParent();
+	const wasAdded = componentRegistry.set(componentId, {
+		result: instance,
+		nContext,
+		parentId,
+		childIds: [],
+	});
+	if (wasAdded) {
+		const parentAfter = parentId ? (componentRegistry.has(parentId) ? componentRegistry.get(parentId) : undefined) : undefined;
+		if (parentAfter?.result) {
+			const parentInstance = parentAfter.result;
+			parentInstance.children = parentInstance.children ?? [];
+			parentInstance.children.push(instance);
+		}
+	}
+}

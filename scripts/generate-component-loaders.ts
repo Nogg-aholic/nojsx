@@ -12,6 +12,7 @@ type CliOptions = {
 type PageModule = {
 	importPath: string;
 	exportName: string;
+	baseExportName: string;
 	routePath: string;
 };
 
@@ -74,6 +75,7 @@ async function readPageModules(pagesRoot: string, outFile: string): Promise<Page
 		modules.push({
 			importPath,
 			exportName,
+			baseExportName: `${baseName.charAt(0).toUpperCase()}${baseName.slice(1)}`,
 			routePath: toRoutePath(exportName),
 		});
 	}
@@ -83,11 +85,17 @@ async function readPageModules(pagesRoot: string, outFile: string): Promise<Page
 
 function createOutput(modules: PageModule[]): string {
 	const importLines = modules.map((mod, index) => `import * as M${index} from ${JSON.stringify(mod.importPath)};`);
-	const loaderLines = modules.map((mod, index) => [
-		`if (M${index} && (M${index} as any)[${JSON.stringify(mod.exportName)}]) {`,
-		`\tnojsxComponentLoaders[${JSON.stringify(mod.exportName)}] = (props?: any) => new ((M${index} as any)[${JSON.stringify(mod.exportName)}])(props);`,
-		`}`,
-	].join("\n"));
+	const loaderLines = modules.map((mod, index) => {
+		const lines = [
+			`if (M${index} && (M${index} as any)[${JSON.stringify(mod.exportName)}]) {`,
+			`\tnojsxComponentLoaders[${JSON.stringify(mod.exportName)}] = (props?: any) => new ((M${index} as any)[${JSON.stringify(mod.exportName)}])(props);`,
+		];
+		if (mod.baseExportName !== mod.exportName) {
+			lines.push(`\tnojsxComponentLoaders[${JSON.stringify(mod.baseExportName)}] = (props?: any) => new ((M${index} as any)[${JSON.stringify(mod.exportName)}])(props);`);
+		}
+		lines.push(`}`);
+		return lines.join("\n");
+	});
 	const routeLines = modules.map((mod) => `\t${JSON.stringify(mod.routePath)}: { componentName: ${JSON.stringify(mod.exportName)} },`);
 	const pageMapLines = modules.map((mod) => `\t${JSON.stringify(mod.exportName)}: ${JSON.stringify(mod.routePath)},`);
 

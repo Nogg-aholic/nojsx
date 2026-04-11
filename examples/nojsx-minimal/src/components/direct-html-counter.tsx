@@ -1,5 +1,5 @@
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
+import { NComponent, type NComponentProps } from "nojsx/core/components/components";
 import type {} from "nojsx/core/types/index";
 
 export class DirectHtmlCounter extends NComponent {
@@ -11,7 +11,7 @@ export class DirectHtmlCounter extends NComponent {
 			.toString(16)
 			.padStart(6, "0")}`;
 
-	constructor(props?: any) {
+	constructor(props?: NComponentProps) {
 		super("DirectHtmlCounter", props);
 	}
 

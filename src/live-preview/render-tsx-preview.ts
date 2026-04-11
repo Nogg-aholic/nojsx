@@ -9,6 +9,12 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { buildGeneratedLoadersModule, readShellPageLayoutFields } from './shell-page-shared.js';
+import {
+  dispatchLivePreviewServerRpc,
+  getLivePreviewServerSession,
+  type LivePreviewServerRequest,
+  type LivePreviewServerRuntime,
+} from '../core/transport/server/live-preview-receiver.js';
 
 
 import { compilePreview } from './compile-tsx-preview.js';
@@ -417,11 +423,35 @@ function stripPreviewBootstrap(source: string): string {
 
 function createAutoMountEntryModuleSource(entryModuleUrl: string): string {
   return [
-    `import { getLivePreviewHtml } from ${JSON.stringify((globalThis as any).__livePreview.jsxRuntimeSpecifier)};`,
     `import { bootstrapClientRuntime } from ${JSON.stringify(`${(globalThis as any).__livePreview.jsxImportSource}/core/util/client-bootstrap`)};`,
-    `import { ShellPageParent } from ${JSON.stringify(`${(globalThis as any).__livePreview.jsxImportSource}/core/components/shell-page-parent`)};`,
-    `import * as entry from ${JSON.stringify(entryModuleUrl)};`,
+    `import { componentRegistry } from ${JSON.stringify(`${(globalThis as any).__livePreview.jsxImportSource}/core/global/registry`)};`,
     `const g = globalThis;`,
+    `async function handleLivePreviewRpc(message) {`,
+    `  if (!message || message.type !== 'nojsx:rpc:call-await') return;`,
+    `  throw new Error('Live preview server bridge is unavailable.');`,
+    `}`,
+    `g.__nojsxLivePreviewBridge = g.__nojsxLivePreviewBridge ?? {`,
+    `  postMessage(message) {`,
+    `    const serverBridge = globalThis.__livePreviewHandleRpc;`,
+    `    if (typeof serverBridge === 'function') {`,
+    `      void Promise.resolve(serverBridge(message))`,
+    `        .then((result) => {`,
+    `          const requestId = message?.requestId;`,
+    `          g.__nojsxRpcPending?.get(requestId)?.resolve?.(result);`,
+    `        })`,
+    `        .catch((error) => {`,
+    `          const requestId = message?.requestId;`,
+    `          g.__nojsxRpcPending?.get(requestId)?.reject?.(error);`,
+    `        })`,
+    `        .finally(() => {`,
+    `          const requestId = message?.requestId;`,
+    `          g.__nojsxRpcPending?.delete?.(requestId);`,
+    `        });`,
+    `      return;`,
+    `    }`,
+    `    throw new Error('Live preview server bridge is unavailable.');`,
+    `  },`,
+    `};`,
     `function resolveMountElement() {`,
     `  const configuredMountId = globalThis.__livePreview?.appHostId;`,
     `  if (typeof configuredMountId === 'string' && configuredMountId.trim()) {`,
@@ -433,43 +463,6 @@ function createAutoMountEntryModuleSource(entryModuleUrl: string): string {
     `  const fallbackMount = document.querySelector('body > div[id]');`,
     `  if (fallbackMount) return fallbackMount;`,
     `  return null;`,
-    `}`,
-    `const candidates = [entry.preview, entry.default, entry.App, entry.Page, entry.Root];`,
-    `const namedRootExport = candidates.find((value) => typeof value === 'function' && typeof value.prototype?.__html === 'function');`,
-    `const exportedEntries = Object.entries(entry).filter(([key, value]) => key !== 'default' && typeof value === 'function' && typeof value.prototype?.__html === 'function');`,
-    `const fallbackRootExport = exportedEntries.length > 0 ? exportedEntries[exportedEntries.length - 1][1] : undefined;`,
-    `const rootExport = namedRootExport ?? fallbackRootExport;`,
-    `function isShellPageParentCtor(value) {`,
-    `  if (typeof value !== 'function') return false;`,
-    `  let ctor = value;`,
-    `  while (ctor && ctor.prototype) {`,
-    `    if (ctor === ShellPageParent || ctor.name === 'ShellPageParent') return true;`,
-    `    const nextProto = Object.getPrototypeOf(ctor.prototype);`,
-    `    if (!nextProto || nextProto === Object.prototype) break;`,
-    `    ctor = nextProto.constructor;`,
-    `  }`,
-    `  return false;`,
-    `}`,
-    `const entryIsShellPageParent = !!g.__livePreview?.entryExtendsShellPageParent || isShellPageParentCtor(rootExport);`,
-    `const previewTargetComponentId = 'ShellPageParent.PreviewTSXTargetComponent';`,
-    `class PreviewTSXTargetShellPage extends ShellPageParent {`,
-    `  static layout_title = '';`,
-    `  static layout_cspNonce = 'nsx-importmap';`,
-    `  static layout_appHostId = 'info';`,
-    `  static layout_bodyClass = '';`,
-    `  static layout_head_html = '';`,
-    `  static headerAttributes = 'lang="en"';`,
-    `  static layout_header = '<div></div>';`,
-    `  static layout_footer = '<div></div>';`,
-    `  static layout_scripts = '<div></div>';`,
-    `  constructor(props) {`,
-    `    super({ ...(props || {}) });`,
-    `  }`,
-    `  html = () => {`,
-    `    if (typeof rootExport !== 'function') return '';`,
-    `    const target = new rootExport({ __id: previewTargetComponentId });`,
-    `    return typeof target?.__html === 'function' ? target.__html() : '';`,
-    `  };`,
     `}`,
     `function splitPath(fullPath) {`,
     `  const qIndex = fullPath.indexOf('?');`,
@@ -527,29 +520,10 @@ function createAutoMountEntryModuleSource(entryModuleUrl: string): string {
     `  g.__nojsxNav.pathname = next.pathname;`,
     `  g.__nojsxNav.query = next.query;`,
     `}`,
-    `let rootShellComponent = null;`,
-    `function getRootInstance() {`,
-    `  if (!rootShellComponent) {`,
-    `    if (entryIsShellPageParent) {`,
-    `      rootShellComponent = new rootExport({});`,
-    `    } else {`,
-    `      rootShellComponent = new PreviewTSXTargetShellPage({});`,
-    `    }`,
-    `  }`,
-    `  return rootShellComponent;`,
-    `}`,
     `function renderRootShell() {`,
     `  const mount = resolveMountElement();`,
     `  if (!mount) throw new Error('Missing live preview mount element');`,
-    `  const component = getRootInstance();`,
-    `  const componentId = String(component?.id ?? '');`,
-    `  const hasMountedRoot = componentId.length > 0 && !!document.querySelector('[data-component-id="' + componentId + '"]');`,
-    `  if (hasMountedRoot && typeof component?.render === 'function') {`,
-    `    component.render();`,
-    `    return;`,
-    `  }`,
-    `  const html = typeof component?.__html === 'function' ? component.__html() : '';`,
-    `  mount.innerHTML = html;`,
+    `  return mount;`,
     `}`,
     `function renderPreviewRoute() {`,
     `  const outlet = g.__nojsxNavOutlet;`,
@@ -563,7 +537,7 @@ function createAutoMountEntryModuleSource(entryModuleUrl: string): string {
     `    mountedOutlet.render();`,
     `  }`,
     `}`,
-    `function syncFromLocation() {`,
+    `async function syncFromLocation() {`,
     `  syncNavState(getPreviewNavPath());`,
     `  renderPreviewRoute();`,
     `}`,
@@ -582,22 +556,16 @@ function createAutoMountEntryModuleSource(entryModuleUrl: string): string {
     `    event.preventDefault();`,
     `    syncNavState(rawHref);`,
     `    updatePreviewLocation(rawHref);`,
-    `    renderPreviewRoute();`,
+    `    void syncFromLocation();`,
     `  });`,
-    `  window.addEventListener('popstate', syncFromLocation);`,
-    `  window.addEventListener('hashchange', syncFromLocation);`,
-    `}`,
-    `if (!rootExport) {`,
-    `  throw new Error('Live preview entry module must export an NComponent root as preview, default, App, Page, Root, or another exported NComponent class/function.');`,
+    `  window.addEventListener('popstate', () => { void syncFromLocation(); });`,
+    `  window.addEventListener('hashchange', () => { void syncFromLocation(); });`,
     `}`,
     `if (!globalThis.__livePreviewMode && !globalThis.live_preview) {`,
     `  globalThis.__nojsxDevPreviewMode = true;`,
     `  bootstrapClientRuntime();`,
     `  wirePreviewNavigation();`,
-    `  syncFromLocation();`,
-    `}`,
-    `if (globalThis.__livePreviewMode || globalThis.live_preview) {`,
-    `  globalThis.__livePreviewHtml = await getLivePreviewHtml();`,
+    `  void syncFromLocation();`,
     `}`,
     '',
   ].join('\n');
@@ -1181,6 +1149,33 @@ async function compileEmittedPreviewToModule(
   return bootstrapModulePath;
 }
 
+async function initializeLivePreviewServerRuntime(
+  serverSessionId: string,
+  filePath: string,
+  sourceText: string,
+  provider: ProviderInfo,
+  outDir: string,
+  compiled: CompiledPreviewArtifacts,
+): Promise<void> {
+  const session = getLivePreviewServerSession(serverSessionId);
+  if (session.runtime) {
+    return;
+  }
+
+  const serverEntryModulePath = await materializePreviewModuleGraph({
+    entryPath: compiled.emittedJsPath,
+    provider,
+    outDir,
+    moduleMap: compiled.moduleMap,
+  });
+  await import(pathToFileURL(serverEntryModulePath).href + `?server=${Date.now()}`);
+  const registryModule = await import(pathToFileURL(provider.resolved.components).href + `?registry=${Date.now()}`);
+  session.runtime = {
+    componentRegistry: (registryModule as any).componentRegistry,
+    nojsxComponentLoaders: (registryModule as any).nojsxComponentLoaders,
+  };
+}
+
 export async function renderLivePreview(payload: unknown): Promise<string> {
   const filePath = typeof (payload as any)?.filePath === 'string' ? (payload as any).filePath : '';
   const rawSourceText = (() => {
@@ -1241,6 +1236,8 @@ export async function renderLivePreview(payload: unknown): Promise<string> {
     const compiled = await emitCompiledJs(filePath, previewSourceText, tempDir);
     const html = await buildInlinePreviewHtml({ filePath, sourceText: previewSourceText, tempDir, compiled });
     const compiledPath = await compileEmittedPreviewToModule(filePath, previewSourceText, tempDir, compiled);
+    await initializeLivePreviewServerRuntime(serverSessionId, filePath, previewSourceText, provider, tempDir, compiled);
+    (globalThis as any).__livePreviewHandleRpc = (request: LivePreviewServerRequest) => dispatchLivePreviewServerRpc(serverSessionId, request);
 
     const runnerPath = path.join(tempDir, `${randomUUID()}.runner.mjs`);
     const moduleUrl = pathToFileURL(compiledPath).href + `?t=${Date.now()}`;

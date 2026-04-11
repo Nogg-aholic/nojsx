@@ -54,7 +54,13 @@ function ensureNojsxGlobalsInitialized(): void {
 	(g as any).isLivePreviewMode = (g as any).isLivePreviewMode ?? isLivePreviewMode;
 	// Some emitters/tools use _jsxDEV as a global.
 	g._jsxDEV = g._jsxDEV ?? g.jsxDEV;
-	g.NComponent = g.NComponent ?? NComponent;
+	if (!g.NComponent) {
+		queueMicrotask(() => {
+			if (!g.NComponent) {
+				g.NComponent = NComponent;
+			}
+		});
+	}
 }
 
 // Ensure runtime globals exist before any helper runs.

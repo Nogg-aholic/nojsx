@@ -22,6 +22,16 @@ type __nojsxPreviewRenderDocumentFn = (html: string) => void;
 type __nojsxGetLivePreviewHtmlFn = () => Promise<string>;
 type __nojsxIsLivePreviewModeFn = () => boolean;
 type __nojsxEditorFn = (entry: Function, props?: Record<string, unknown>) => string;
+type __nojsxPromiseLikeKeys = 'then' | 'catch' | 'finally';
+type __nojsxRpcify<T> =
+  T extends (...args: infer A) => infer R
+    ? ((...args: A) => Promise<Awaited<R>>) & { __nojsxRpcName?: string }
+    : T extends object
+      ? { [K in keyof T as K extends __nojsxPromiseLikeKeys ? never : K]: __nojsxRpcify<T[K]> }
+      : T;
+
+type __nojsxVscodeRpcApi = __nojsxRpcify<typeof import('vscode')>;
+type __nojsxRpcSymbolRef = { __nojsxRpcName?: string };
 
 export type IntrinsicRenderer = (props?: any) => any;
 
@@ -60,6 +70,9 @@ export type ShellBridgeExtended = ComponentInstance & {
 
 declare global {
   var g: GlobalThis;
+  var vscode: __nojsxVscodeRpcApi;
+  var getDocs: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<import('nojsx/core/transport/server/upstream-host-openapi').HostOpenApiDocument>) & { __nojsxRpcName?: string };
+  var getDocsHtml: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<string>) & { __nojsxRpcName?: string };
 
   namespace JSX {
     type Element = string;
@@ -118,6 +131,8 @@ export interface nojsxComponent {
 
 declare global {
   interface GlobalThis {
+    getDocs?: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<import('nojsx/core/transport/server/upstream-host-openapi').HostOpenApiDocument>) & { __nojsxRpcName?: string };
+    getDocsHtml?: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<string>) & { __nojsxRpcName?: string };
     __currentComponentId?: string | null;
 
     __nojsxInlineHandlerNextId?: number;
@@ -162,6 +177,7 @@ declare global {
       sourceText?: string;
       serverProcessRef?: string;
       serverSessionId?: string;
+      hostCapabilities?: Record<string, unknown>;
       workingDirectory?: string;
       projectRoot?: string;
       requestPath?: string;
