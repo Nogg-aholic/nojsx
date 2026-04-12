@@ -1,4 +1,4 @@
-import { NComponent } from '../components/components.js';
+import { NComponent } from './components.js';
 import { ShellBridgeExtended } from '../types/index.js';
 
 function splitPath(fullPath: string): { pathname: string; query: string } {
@@ -166,15 +166,6 @@ function resolveNavInput(pathOrKey: string, params?: Record<string, string>): st
 	return resolveNavPath(String(routeTemplate), params);
 }
 
-function updatePreviewLocation(resolved: string): void {
-	if (typeof window === 'undefined') return;
-	const currentUrl = new URL(window.location.href);
-	currentUrl.searchParams.set('vscode-livepreview', 'true');
-	if (resolved === '/home') currentUrl.searchParams.delete('__nojsx_route');
-	else currentUrl.searchParams.set('__nojsx_route', resolved);
-	window.history.pushState({}, '', currentUrl.toString());
-}
-
 export function extendShellBridge(shell: NComponent): ShellBridgeExtended {
 	// Prototype chain:
 	//   extended -> extensionProto (methods) -> shell (actual bridge)
@@ -217,9 +208,8 @@ export function extendShellBridge(shell: NComponent): ShellBridgeExtended {
 				g.__nojsxNav.params = picked?.params ?? {};
 
 				try {
-					if ((g as any).__livePreviewMode || (g as any).__nojsxDevPreviewMode || (g as any).live_preview) {
-						updatePreviewLocation(resolved);
-					} else {
+					const handled = g.navHandler?.(resolved);
+					if (!handled) {
 						window.history.pushState({}, '', resolved);
 					}
 				} catch {

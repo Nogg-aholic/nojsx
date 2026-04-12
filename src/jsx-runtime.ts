@@ -4,10 +4,9 @@
 
 // Must run before importing any generated component modules.
 import './jsx-globals.js';
-import { nojsxGlobals } from './core/global/registry.js';
-import { componentRegistry } from './core/global/registry.js';
-import type { __nojsxSlotCaptureToken, nojsxComponent } from './core/types/index.js';
-import { bootstrapClientRuntime } from './core/util/client-bootstrap.js';
+import { nojsxGlobals } from './core/components/registry.js';
+import { componentRegistry } from './core/components/registry.js';
+import type { nojsxComponent } from './core/types/index.js';
 import { renderSlotChildren, join as _join } from './core/util/util.js';
 import { NComponent, NComponentProps } from './core/components/components.js';
 
@@ -32,13 +31,6 @@ function ensureNojsxGlobalsInitialized(): void {
 	g.__nojsxInlineHandlers = g.__nojsxInlineHandlers ?? new Map<string, Function>();
 	g.__nojsxInlineHandlersByComponent = g.__nojsxInlineHandlersByComponent ?? new Map<string, Set<string>>();
 
-	// Slot capture globals
-	g.__nojsxSlotCaptureWired = g.__nojsxSlotCaptureWired ?? false;
-	g.__nojsxSlotCaptureNextId = g.__nojsxSlotCaptureNextId ?? 1;
-	g.__nojsxSlotCaptureStack = g.__nojsxSlotCaptureStack ?? [];
-	g.__nojsxSlotCaptureData = g.__nojsxSlotCaptureData ?? new Map<number, Record<string, string>>();
-	g.__nojsxDebugSlots = g.__nojsxDebugSlots ?? false;
-
 	// Wire proxy implementations (see jsx-globals.ts)
 	(g as any).__nojsx_jsx_impl = jsx;
 	(g as any).__nojsx_jsxs_impl = jsxs;
@@ -49,23 +41,17 @@ function ensureNojsxGlobalsInitialized(): void {
 	g.jsx = g.jsx ?? jsx;
 	g.jsxs = g.jsxs ?? jsxs;
 	g.jsxDEV = g.jsxDEV ?? jsxDEV;
-	(g as any).livePreviewJSX = (g as any).livePreviewJSX ?? livePreviewJSX;
-	(g as any).getLivePreviewHtml = (g as any).getLivePreviewHtml ?? getLivePreviewHtml;
-	(g as any).isLivePreviewMode = (g as any).isLivePreviewMode ?? isLivePreviewMode;
+	(g as any).getInlineHandler = (g as any).getInlineHandler ?? getInlineHandler;
+	(g as any).getInlineOnclick = (g as any).getInlineOnclick ?? getInlineOnclick;
+	(g as any).getInlineEventHandler = (g as any).getInlineEventHandler ?? getInlineEventHandler;
 	// Some emitters/tools use _jsxDEV as a global.
 	g._jsxDEV = g._jsxDEV ?? g.jsxDEV;
-	if (!g.NComponent) {
-		queueMicrotask(() => {
-			if (!g.NComponent) {
-				g.NComponent = NComponent;
-			}
-		});
-	}
+	// Avoid touching the imported binding during module-cycle initialization.
+	// Consumers that need the constructor should import it directly.
 }
 
 // Ensure runtime globals exist before any helper runs.
 ensureNojsxGlobalsInitialized();
-bootstrapClientRuntime();
 
 
 export function clearInlineHandlersForComponent(componentId: string): void {
@@ -139,7 +125,6 @@ export function getInlineEventHandler(componentId: string, handlerId: string): F
 export function setRenderContext(id: string | null): string | null {
 	const prev = g.__currentComponentId ?? null;
 	g.__currentComponentId = id;
-	ensureNojsxSlotCaptureWiring();
 	return prev;
 }
 
@@ -150,147 +135,6 @@ export function setRenderContext(id: string | null): string | null {
  */
 export function getCurrentRenderContext(): string | null {
 	return g.__currentComponentId ?? null;
-}
-
-
-function slotDebug(...args: any[]): void {
-	void args;
-}
-
-function discardSlotCaptureTokenById(id: number): boolean {
-	const stack = g.__nojsxSlotCaptureStack;
-	if (!stack || stack.length === 0) return false;
-	for (let i = stack.length - 1; i >= 0; i--) {
-		const t = stack[i];
-		if (t.id !== id) continue;
-		stack.splice(i, 1);
-		g.__nojsxSlotCaptureData?.delete(id);
-		return true;
-	}
-	return false;
-}
-
-function ensureNojsxSlotCaptureWiring(): void {
-	if (g.__nojsxSlotCaptureWired) return;
-
-	g.__nojsxSlotCaptureNextId = g.__nojsxSlotCaptureNextId ?? 1;
-	g.__nojsxSlotCaptureStack = g.__nojsxSlotCaptureStack ?? [];
-	g.__nojsxSlotCaptureData = g.__nojsxSlotCaptureData ?? new Map<number, Record<string, string>>();
-
-	const n = g.n;
-	if (!n || typeof n !== 'object') {
-		// `globalThis.n` may not be initialized yet (intrinsics-generated module loads later).
-		// Don't mark as wired; we'll retry on the next render.
-		slotDebug('wiring skipped: globalThis.n not ready');
-		return;
-	}
-
-	for (const key of Object.keys(n)) {
-		const desc = Object.getOwnPropertyDescriptor(n, key);
-		if (desc?.get) continue;
-		const value = (n as any)[key];
-		if (!value || typeof value !== 'object') continue;
-
-		Object.defineProperty(n, key, {
-			enumerable: true,
-			configurable: true,
-			get() {
-				const parentId: string | null = g.__currentComponentId ?? null;
-				// Capture even without an active render context; parentId may be null.
-				// This keeps slot passing working for plain function components that don't set __currentComponentId.
-
-				const rootName: string = (value as any).__nojsxIntrinsicName ?? (value as any).__nojsxRootName ?? (value as any).__nojsxRootName ?? `n${key}`;
-
-				g.__nojsxSlotCaptureNextId = g.__nojsxSlotCaptureNextId ?? 1;
-				g.__nojsxSlotCaptureStack = g.__nojsxSlotCaptureStack ?? [];
-				g.__nojsxSlotCaptureData = g.__nojsxSlotCaptureData ?? new Map<number, Record<string, string>>();
-				const tokenId = g.__nojsxSlotCaptureNextId++;
-				let rolledBack = false;
-				const proxy = new Proxy(value as any, {
-					get(target, prop, receiver) {
-						const propValue = Reflect.get(target, prop, receiver);
-						// If this access is only to reach a slot placeholder (e.g. `n.layoutsplitter.items`),
-						// discard the token created by the base `n.layoutsplitter` access.
-						if (!rolledBack && propValue && typeof propValue === 'object' && (propValue as any).__nojsxRootName === rootName) {
-							rolledBack = true;
-							if (discardSlotCaptureTokenById(tokenId)) {
-								slotDebug('discard token (slot access)', { rootName, parentId, id: tokenId, key, prop: String(prop) });
-							}
-						}
-						return propValue;
-					},
-				});
-				const token: __nojsxSlotCaptureToken = { id: tokenId, rootName, component: proxy as any, parentId };
-				g.__nojsxSlotCaptureStack.push(token);
-				g.__nojsxSlotCaptureData.set(token.id, {});
-				slotDebug('create token', { rootName, parentId, id: token.id, key });
-				return proxy as any;
-			},
-		});
-	}
-
-	g.__nojsxSlotCaptureWired = true;
-	slotDebug('wiring installed', { roots: Object.keys(n) });
-}
-
-function getNojsxSlotKeyFromComponent(component: NComponent): string {
-	const nameOf = (node: any): string | undefined =>
-		node?.__nojsxSlotTemplateName ??
-		(typeof node?.template === 'string' ? node.template : node?.template?.name) ??
-		(typeof node?.name === 'string' ? node.name : undefined);
-
-	// Prefer generator-stamped template names, but fall back to string `template` (slot placeholder).
-	const ownName: string | undefined = nameOf(component);
-	if (!component?.__nojsxParent) return ownName ?? 'Slot';
-
-	const parts: string[] = [];
-	let cur: NComponent = component;
-	while (cur && cur.__nojsxParent) {
-		const name: string | undefined = nameOf(cur);
-		if (name) parts.push(name);
-		// Stop before including the root template name.
-		if (!cur.__nojsxParent?.__nojsxParent) break;
-		cur = cur.__nojsxParent;
-	}
-	parts.reverse();
-	return parts.join('.') || (ownName ?? 'Slot');
-}
-
-function peekSlotCaptureTokenFor(rootName: string, parentId: string | null): __nojsxSlotCaptureToken | undefined {
-	const stack = g.__nojsxSlotCaptureStack;
-	if (!stack || stack.length === 0) return undefined;
-	for (let i = stack.length - 1; i >= 0; i--) {
-		const t = stack[i];
-		if (t.parentId === parentId && t.rootName === rootName) return t;
-	}
-	return undefined;
-}
-
-function consumeSlotCaptureTokenFor(component: NComponent, parentId: string | null): { rootName: string; slots: Record<string, string> } | undefined {
-	const stack = g.__nojsxSlotCaptureStack;
-	if (!stack || stack.length === 0) return undefined;
-
-	for (let i = stack.length - 1; i >= 0; i--) {
-		const t = stack[i];
-		if (t.parentId !== parentId) continue;
-		if (t.component !== component) continue;
-		stack.splice(i, 1);
-		const slots = g.__nojsxSlotCaptureData?.get(t.id) ?? {};
-		g.__nojsxSlotCaptureData?.delete(t.id);
-		return { rootName: t.rootName, slots };
-	}
-	return undefined;
-}
-
-function deriveScopedSlots(tokenSlots: Record<string, string>, scopePrefix: string): Record<string, string> | undefined {
-	if (!scopePrefix) return undefined;
-	const prefix = scopePrefix + '.';
-	let out: Record<string, string> | undefined;
-	for (const [k, v] of Object.entries(tokenSlots)) {
-		if (!k.startsWith(prefix)) continue;
-		(out ??= {})[k.slice(prefix.length)] = v;
-	}
-	return out;
 }
 
 // Track the current component being rendered
@@ -354,48 +198,6 @@ function isNojsxComponentConstructor(fn: Function): boolean {
 	return !!proto && typeof proto.__html === 'function';
 }
 
-
-function getIntrinsicContextInfo(): { isInside: boolean; isParent: boolean; isSlot: boolean; contextName: string | null } {
-	const contextName = g.__nojsxInsideIntrinsic;
-
-	if (!contextName) {
-		return { isInside: false, isParent: false, isSlot: false, contextName: null };
-	}
-
-	const component = (g as any)[contextName];
-	const isParent = component && typeof component === 'object' && Array.isArray(component.slots);
-	const isSlot = component && !isParent; // It's something registered but not a parent with slots
-
-	return { isInside: true, isParent, isSlot, contextName };
-}
-
-// Prevent collisions between semantic HTML tags and intrinsic component names.
-// Example: COMPONENTS['header'] exists for <n.header>, but native <header>
-// inside that component must stay a plain HTML tag (not re-dispatched to Header()).
-const NATIVE_HTML_TAGS = new Set<string>([
-	'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio',
-	'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button',
-	'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
-	'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt',
-	'em', 'embed',
-	'fieldset', 'figcaption', 'figure', 'footer', 'form',
-	'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html',
-	'i', 'iframe', 'img', 'input', 'ins',
-	'kbd',
-	'label', 'legend', 'li', 'link',
-	'main', 'map', 'mark', 'menu', 'meta', 'meter',
-	'nav', 'noscript',
-	'object', 'ol', 'optgroup', 'option', 'output',
-	'p', 'param', 'picture', 'pre', 'progress',
-	'q',
-	'rp', 'rt', 'ruby',
-	's', 'samp', 'script', 'section', 'select', 'slot', 'small', 'source', 'span', 'strong', 'style', 'sub', 'summary', 'sup',
-	'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track',
-	'u', 'ul',
-	'var', 'video',
-	'wbr',
-]);
-
 /**
  * Main JSX runtime entry point used by transpiled `jsx(...)` calls.
  *
@@ -408,11 +210,7 @@ const NATIVE_HTML_TAGS = new Set<string>([
  * Behavior overview:
  * - Class components are instantiated and rendered via `__html()`.
  * - Function components are invoked directly.
- * - Intrinsic renderers can auto-map top-level native tags (for example `<button>` to `n_button`).
- * - Slot capture/injection wires nested slot content into intrinsic templates.
- *
- * Side effects include global render-context reads/writes, inline handler registration,
- * and slot-capture token management.
+ * - String tags render to HTML with inline-handler data attributes when needed.
  *
  * @example
  * const html = jsx('div', { class: 'card', children: 'Hello' });
@@ -422,12 +220,6 @@ const NATIVE_HTML_TAGS = new Set<string>([
  * const html = jsx(MyComponent, { title: 'Hi' });
  */
 export function jsx(tag: string | Function | symbol, props?: JSX.HtmlTag, jsxKey?: any): string {
-	// JSX evaluates tag expressions (like `n.topbar`) before calling jsx().
-	// Ensure the `n.*` getter wiring is installed as soon as possible,
-	// and keep retrying until `globalThis.n` exists.
-	ensureNojsxSlotCaptureWiring();
-
-	const context = getIntrinsicContextInfo();
 	if (jsxKey !== undefined) {
 		props = props ? { ...props, key: jsxKey } : { key: jsxKey };
 	}
@@ -464,99 +256,15 @@ export function jsx(tag: string | Function | symbol, props?: JSX.HtmlTag, jsxKey
 		} else {
 			const nojsxComponent = tag as nojsxComponent;
 			templateFunction = typeof (nojsxComponent).template === 'function' ? (nojsxComponent).template : undefined;
-			// Keep verbose object logging behind the debug flag.
-			slotDebug('render component slot', {
-				name:
-					(tag as any)?.__nojsxSlotTemplateName ??
-					(typeof (tag as any)?.template === 'string' ? (tag as any).template : (tag as any)?.template?.name) ??
-					(tag as any)?.name,
-			});
 		}
 
 		if (typeof templateFunction !== 'function') {
-			throw new Error(`[jsx] Slot template is not a function: ${String(templateFunction)}`); // ${contextStr}${stackStr}
+			throw new Error(`[jsx] Slot template is not a function: ${String(templateFunction)}`);
 		}
 		const parentId = (globalThis as unknown as nojsxGlobals).__currentComponentId;
 		const parentIdNormalized = parentId ?? null;
-		const skipSlotCapture = !!(tag as any)?.__nojsxNoSlotCapture;
-		if (skipSlotCapture) {
-			const nextProps = props ? { ...props, __parentId: parentIdNormalized } : { __parentId: parentIdNormalized };
-			const result = String(templateFunction(nextProps));
-			return result;
-		}
-
-		// Slot capture: slot nodes render before their parent root due to JS evaluation order.
-		// We capture slot children into a token created when `n.<root>` was evaluated.
-		const rootName: string | undefined = (tag as any).__nojsxRootName ?? (tag as any).__nojsxParentIntrinsicName;
-		const isRoot = Array.isArray((tag as any).slots) && !!(tag as any).__nojsxIntrinsicName;
-		if (!isRoot && rootName) {
-			const token = peekSlotCaptureTokenFor(rootName, parentIdNormalized);
-			if (token) {
-				const slotKey = getNojsxSlotKeyFromComponent(tag as any);
-				let slotHtml = '';
-				slotHtml = renderChildren(props?.children);
-				const map = g.__nojsxSlotCaptureData?.get(token.id);
-				if (map) {
-					map[slotKey] = slotHtml;
-					slotDebug('capture', { rootName, parentId: parentIdNormalized, tokenId: token.id, slotKey, len: slotHtml.length });
-				}
-			} else {
-				slotDebug('capture-miss (no token)', {
-					rootName,
-					parentId: parentIdNormalized,
-					slot:
-						(tag as any).__nojsxSlotTemplateName ??
-						(typeof (tag as any)?.template === 'string' ? (tag as any).template : (tag as any)?.template?.name) ??
-						(tag as any)?.name,
-				});
-			}
-		}
-
-		// Root injection: when the root finally renders, consume its token and pass __slots.
-		let injectedSlots: Record<string, string> | undefined;
-		let injectedRootName: string | undefined;
-		let tokenSlotsForScope: Record<string, string> | undefined;
-		if (isRoot) {
-			const consumed = consumeSlotCaptureTokenFor(tag, parentIdNormalized);
-			if (consumed) {
-				injectedSlots = consumed.slots;
-				tokenSlotsForScope = consumed.slots;
-				injectedRootName = consumed.rootName;
-				slotDebug('consume', { rootName: consumed.rootName, parentId: parentIdNormalized, keys: Object.keys(consumed.slots) });
-			} else {
-				slotDebug('consume-miss (no token)', { rootName: (tag as any).__nojsxIntrinsicName ?? (tag as any).__nojsxRootName, parentId: parentIdNormalized });
-			}
-		} else if (rootName) {
-			// Nested slot templates (e.g. SidebarHeaderTemplate) should also receive __slots,
-			// scoped to their own subtree.
-			const token = peekSlotCaptureTokenFor(rootName, parentIdNormalized);
-			if (token) {
-				tokenSlotsForScope = g.__nojsxSlotCaptureData?.get(token.id);
-			}
-		}
-
-		const parentIntrinsicName: string | undefined = injectedRootName ?? (tag as any).__nojsxParentIntrinsicName;
-		const prevInside = g.__nojsxInsideIntrinsic;
-		if (parentIntrinsicName) {
-			g.__nojsxInsideIntrinsic = parentIntrinsicName;
-		}
 		const nextProps = props ? { ...props, __parentId: parentIdNormalized } : { __parentId: parentIdNormalized };
-
-		// Inject slots:
-		// - Root gets the full map (keys like TopBarMenu, SidebarHeader, SidebarFooter, SidebarGroup...)
-		// - Nested templates get a scoped map with their prefix stripped (e.g. SidebarHeaderLeft/Right)
-		if (injectedSlots) {
-			(nextProps as any).__slots = injectedSlots;
-		} else if (tokenSlotsForScope) {
-			const scopePrefix = getNojsxSlotKeyFromComponent(tag as any);
-			const scoped = deriveScopedSlots(tokenSlotsForScope, scopePrefix);
-			if (scoped) {
-				(nextProps as any).__slots = scoped;
-				slotDebug('inject-scoped', { rootName, scopePrefix, keys: Object.keys(scoped) });
-			}
-		}
 		const result = String(templateFunction(nextProps));
-		g.__nojsxInsideIntrinsic = prevInside;
 		return result;
 	}
 
@@ -612,77 +320,6 @@ export function jsx(tag: string | Function | symbol, props?: JSX.HtmlTag, jsxKey
 	html += '>';
 	html += renderChildren(children);
 	html += '</' + tagName + '>';
-	return html;
-}
-
-export type livePreviewJsxOptions = {
-	mount?: string | Element;
-};
-
-type PreviewProcessLike = {
-	env?: Record<string, string | undefined>;
-};
-
-declare const process: PreviewProcessLike | undefined;
-
-export function isLivePreviewMode(): boolean {
-	const processEnv = typeof process === 'undefined' ? undefined : process.env;
-	return !!g.live_preview || !!g.__livePreviewMode || processEnv?.LIVE_PREVIEW === 'true';
-}
-
-export async function getLivePreviewHtml(): Promise<string> {
-	const html = g.__livePreviewHtml ?? g.__livePreview?.precomputedHtml;
-	if (typeof html !== 'string' || !html.trim()) {
-		throw new Error('[nojsx] live preview HTML was not precomputed by the runner');
-	}
-
-	g.__livePreviewHtml = html;
-	return html;
-}
-
-function resolveLivePreviewMount(mount?: string | Element): Element | null {
-	if (typeof document === 'undefined') return null;
-	if (!mount) return document.getElementById('app');
-	if (typeof mount === 'string') return document.querySelector(mount);
-	return mount;
-}
-
-/**
- * Mounts a root JSX/component tag into a browser element for live preview.
- *
- * @param tag - Root tag (typically an outer `NComponent` class like `HelloWorld`).
- * @param props - Optional props passed to the root.
- * @param options - Mount target options.
- * @returns Initial rendered HTML string.
- */
-export function livePreviewJSX(tag: string | Function | symbol, props?: JSX.HtmlTag, options: livePreviewJsxOptions = {}): string {
-	if (isLivePreviewMode()) {
-		const previewHtml = g.__livePreviewHtml ?? g.__livePreview?.precomputedHtml;
-		if (typeof previewHtml === 'string' && previewHtml.trim()) {
-			g.__livePreviewHtml = previewHtml;
-			return previewHtml;
-		}
-	}
-
-	if (typeof window === 'undefined' || typeof document === 'undefined') {
-		return jsx(tag, props);
-	}
-
-	bootstrapClientRuntime();
-	const mountEl = resolveLivePreviewMount(options.mount);
-	if (!mountEl) {
-		throw new Error('[nojsx] livePreviewJSX: mount target not found. Expected #app or provided selector/element.');
-	}
-
-	if (typeof tag === 'function' && isNojsxComponentConstructor(tag)) {
-		const instance = new (tag as any)(props ?? {});
-		const initialHtml = String(instance.__html());
-		mountEl.innerHTML = initialHtml;
-		return initialHtml;
-	}
-
-	const html = jsx(tag, props);
-	mountEl.innerHTML = html;
 	return html;
 }
 
@@ -756,10 +393,6 @@ export function jsxDEV(tag: string | Function | symbol, props?: any, key?: any, 
 
 	return jsx(tag, props, key);
 }
-
-// Ensure the `n.*` getters are wired before any JSX evaluates `n.topbar`/`n.sidebar`.
-// (JS evaluates the tag expression before calling jsx/jsxs.)
-ensureNojsxSlotCaptureWiring();
 
 /**
  * Injects component identity/class attributes into root HTML.

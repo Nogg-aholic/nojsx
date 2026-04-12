@@ -1,5 +1,6 @@
+import { jsx as _jsx } from '../../jsx-runtime.js';
 import { NComponent, NComponentProps } from './components.js';
-import { componentRegistry, nojsxComponentLoaders, type nojsxGlobals } from '../global/registry.js';
+import { componentRegistry, nojsxComponentLoaders, type nojsxGlobals } from '../components/registry.js';
 
 type CurrentPageState = {
 	fullPath: string;
@@ -210,6 +211,58 @@ export class NavOutlet extends NComponent {
 		return `<div class="${wrapperClass}" data-nojsx-route="${escapeAttribute(routeKey)}">${pageMarkup}</div>`;
 	}
 
+	private renderClientRouteWrappers(currentRouteKey: string): boolean {
+		if (typeof document === 'undefined') {
+			return false;
+		}
+
+		const outletEl = document.querySelector(`[data-component-id="${this.id}"]`);
+		if (!outletEl) {
+			return false;
+		}
+
+		for (const [routeKey, cached] of this.pageCache.entries()) {
+			const selector = `[data-component-id="${this.id}"] [data-nojsx-route="${escapeAttribute(routeKey)}"]`;
+			let wrapper = document.querySelector(selector) as HTMLElement | null;
+			if (!wrapper) {
+				outletEl.insertAdjacentHTML('beforeend', this.renderCachedPage(routeKey, currentRouteKey, cached));
+				wrapper = document.querySelector(selector) as HTMLElement | null;
+			}
+			if (!wrapper) {
+				continue;
+			}
+
+			wrapper.className = routeKey === currentRouteKey ? '' : 'hidden';
+
+			const mountedChild = document.querySelector(`[data-component-id="${cached.instance.id}"]`);
+			if (mountedChild && mountedChild.parentElement !== wrapper) {
+				wrapper.replaceChildren(mountedChild);
+			}
+		}
+
+		for (const wrapper of Array.from(outletEl.querySelectorAll('[data-nojsx-route]'))) {
+			const routeKey = wrapper.getAttribute('data-nojsx-route') ?? '';
+			if (!this.pageCache.has(routeKey)) {
+				wrapper.remove();
+			}
+		}
+
+		return true;
+	}
+
+	private syncClientRouteWrappers(): void {
+		const currentPage = getCurrentPageState();
+		if (!currentPage) {
+			return;
+		}
+
+		for (const cached of this.pageCache.values()) {
+			componentRegistry.consumePreservedChildId(cached.instance.id);
+		}
+		this.ensureCachedPage(currentPage.routeKey, currentPage.componentName);
+		this.renderClientRouteWrappers(currentPage.routeKey);
+	}
+
 	html = (): JSX.Element => {
 		const currentPage = getCurrentPageState();
 		if (!currentPage) {
@@ -229,6 +282,7 @@ export class NavOutlet extends NComponent {
 
 	onLoad: () => void = () => {
 		(globalThis as any).__nojsxNavOutlet = this;
+		this.syncClientRouteWrappers();
 	};
 }
 

@@ -72,7 +72,7 @@ nojsx components are classes. Reusable UI typically extends `NComponent`.
 
 ```tsx
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
+import { NComponent } from "nojsx";
 
 export class CounterCard extends NComponent {
   count = 0;
@@ -110,8 +110,7 @@ The shell defines shared layout and provides the host for route content.
 
 ```tsx
 /** @jsxImportSource nojsx */
-import { ShellPageParent } from "nojsx/core/components/shell-page-parent";
-import { NavOutlet } from "nojsx/core/components/nav-outlet";
+import { ShellPageParent, NavOutlet } from "nojsx";
 
 export default class ShellPage extends ShellPageParent {
   static layout_title = "My App";

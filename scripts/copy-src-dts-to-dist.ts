@@ -8,7 +8,6 @@ const SRC_ROOT = path.join(PROJECT_ROOT, 'src');
 const DIST_ROOT = path.join(PROJECT_ROOT, 'dist');
 
 const DECLARATION_FILES = [
-  'core/global/g.d.ts',
   'core/types/index.d.ts',
 ] as const;
 

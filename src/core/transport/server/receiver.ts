@@ -1,7 +1,7 @@
 import { stateCache } from '../../components/components.js';
-import { componentRegistry } from '../../global/registry.js';
-import { nojsxWSEvent } from '../../protocol/events.js';
-import { decodeRpcValue } from '../../protocol/rpc-args.js';
+import { componentRegistry } from '../../components/registry.js';
+import { nojsxWSEvent } from '../events.js';
+import { decodeRpcAwaitMessage, decodeRpcValue } from '@nogg-aholic/nrpc';
 import { createComponentSnapshot } from '../../util/component-snapshot.js';
 import { constructClientComponentOnServer } from './client-construct.js';
 import { sendComponentSnapshot, sendRpcReturn } from './sender.js';
@@ -15,15 +15,14 @@ type ServerLoadResponse = {
   __state?: Record<string, unknown>;
   __snapshot?: Record<string, unknown>;
 };
+function isUpstreamHostMethod(methodName: string): boolean {
+  return methodName.includes('.');
+}
 
 function getGlobalRpcHandler(methodName: string): Function | undefined {
   const globals = globalThis as Record<string, unknown>;
   const candidate = globals[methodName];
   return typeof candidate === 'function' ? candidate : undefined;
-}
-
-function isUpstreamHostMethod(methodName: string): boolean {
-  return methodName.startsWith('vscode.');
 }
 
 function invokeFunction(handler: Function, thisArg: unknown, args: unknown): unknown {
@@ -73,24 +72,14 @@ function getServerStateSnapshot(componentId: string): Record<string, unknown> | 
 export async function handleRpcAwaitFromClient(data: Uint8Array, requesterSocket?: ServerWebSocket<unknown> | null): Promise<boolean> {
   if (data[0] !== nojsxWSEvent.RPC_CALL_AWAIT) return false;
 
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let offset = 1;
-  const requestId = view.getUint32(offset, true);
-  offset += 4;
-
-  const componentIdLen = data[offset++];
-  const componentId = decoder.decode(data.subarray(offset, offset + componentIdLen));
-  offset += componentIdLen;
-
-  const methodNameLen = data[offset++];
-  const methodName = decoder.decode(data.subarray(offset, offset + methodNameLen));
-  offset += methodNameLen;
-
+  let requestId: number;
+  let componentId: string;
+  let methodName: string;
   let args: unknown;
   try {
-    [args] = decodeRpcValue(data, offset);
+    ({ requestId, componentId, methodName, args } = decodeRpcAwaitMessage(data, nojsxWSEvent.RPC_CALL_AWAIT));
   } catch (error) {
-    sendRpcReturn(requestId, false, String((error as Error)?.message ?? error), requesterSocket);
+    sendRpcReturn(0, false, String((error as Error)?.message ?? error), requesterSocket);
     return true;
   }
 

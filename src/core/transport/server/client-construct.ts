@@ -1,4 +1,4 @@
-import { componentRegistry, type nojsxGlobals } from '../../global/registry.js';
+import { componentRegistry, type nojsxGlobals } from '../../components/registry.js';
 
 export async function constructClientComponentOnServer(args: {
   componentId: string;

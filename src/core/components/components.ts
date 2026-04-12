@@ -1,11 +1,10 @@
 import { clearInlineHandlersForComponent, injectAttributes, setRenderContext } from '../../jsx-dev-runtime.js';
-import { extendShellBridge, createGetShellFunctionServer } from '../bridges/get-shell.js';
-import { nContext, componentRegistry, functionToMethodName, type nojsxGlobals } from '../global/registry.js';
+import { extendShellBridge, createGetShellFunctionServer } from './get-shell.js';
+import { nContext, componentRegistry, functionToMethodName, type nojsxGlobals } from '../components/registry.js';
 import { ensureConnected } from '../transport/client/connection.js';
 import { sendRpcToServerAwait } from '../transport/client/sender.js';
 import { sendRenderComponent, sendUpdateHtml } from '../transport/server/sender.js';
 import { applyComponentSnapshot } from '../util/component-snapshot.js';
-import { refreshClientUiBindings } from '../util/ui-runtime.js';
 
 type RpcArgsFor<T extends (...args: any[]) => any> = Parameters<T> extends [] ? undefined : Parameters<T> extends [infer A] ? A : Parameters<T>;
 
@@ -142,75 +141,9 @@ export abstract class NComponent {
 		return undefined;
 	};
 
-	callHostAsync = <TArgs extends any[], TResult>(method: (...args: TArgs) => TResult, ...args: TArgs): Promise<Awaited<TResult>> => {
-		if (isServer) {
-			const hostMethodName = (method as unknown as { __nojsxRpcName?: string } | undefined)?.__nojsxRpcName;
-			if (typeof hostMethodName !== 'string' || hostMethodName.length === 0) {
-				return Promise.reject(new Error('Cannot resolve host method to name for callHostAsync.'));
-			}
-			const runtime = (globalThis as { __livePreviewRuntime?: { hostRoots?: Record<string, unknown> } }).__livePreviewRuntime;
-			const parts = hostMethodName.split('.').filter(Boolean);
-			let current: unknown = runtime?.hostRoots?.[parts[0]];
-			let parent: unknown = runtime?.hostRoots;
-			for (let index = 1; current !== undefined && index < parts.length; index += 1) {
-				parent = current;
-				current = (current as Record<string, unknown>)[parts[index]];
-			}
-			if (typeof current !== 'function') {
-				return Promise.reject(new Error(`Host handler not found: ${hostMethodName}`));
-			}
-			return Promise.resolve(invokeHostHandlerWithParent(current as Function, parent, args)) as Promise<Awaited<TResult>>;
-		}
-		return this.callOnServerAsync(method, ...args);
-	};
-
-	readHostValue = <TValue>(value: (TValue & { __nojsxRpcName?: string }) | undefined): Promise<Awaited<TValue | undefined>> => {
-		const hostMethodName = (value as unknown as { __nojsxRpcName?: string } | undefined)?.__nojsxRpcName;
-		if (typeof hostMethodName !== 'string' || hostMethodName.length === 0) {
-			return Promise.reject(new Error('Cannot resolve host property to name for readHostValue.'));
-		}
-
-		if (isServer) {
-			const runtime = (globalThis as { __livePreviewRuntime?: { hostRoots?: Record<string, unknown> } }).__livePreviewRuntime;
-			const parts = hostMethodName.split('.').filter(Boolean);
-			let current: unknown = runtime?.hostRoots?.[parts[0]];
-			for (let index = 1; current !== undefined && index < parts.length; index += 1) {
-				current = (current as Record<string, unknown>)[parts[index]];
-			}
-			if (current === undefined) {
-				return Promise.reject(new Error(`Host property not found: ${hostMethodName}`));
-			}
-			return Promise.resolve(current) as Promise<Awaited<TValue | undefined>>;
-		}
-
-		return this.callHostPropertyOnServerAsync<TValue | undefined>(hostMethodName);
-	};
-
-	private callHostPropertyOnServerAsync = <TValue>(methodName: string): Promise<Awaited<TValue>> => {
-		if (isServer) {
-			return Promise.reject(new Error('callHostPropertyOnServerAsync is only available in the live preview client runtime.'));
-		}
-
-		return ensureConnected().then(() => {
-			const globals = globalThis as unknown as nojsxGlobals;
-			globals.__nojsxRpcPending = globals.__nojsxRpcPending ?? new Map();
-			globals.__nojsxRpcNextId = (globals.__nojsxRpcNextId ?? 1) >>> 0;
-			const requestId = globals.__nojsxRpcNextId >>> 0;
-			globals.__nojsxRpcNextId = (requestId + 1) >>> 0;
-
-			return new Promise<Awaited<TValue>>((resolve, reject) => {
-				globals.__nojsxRpcPending?.set(requestId, {
-					resolve: resolve as (value: unknown) => void,
-					reject,
-				});
-				sendRpcToServerAwait(methodName, this.id, null, requestId);
-			});
-		});
-	};
-
 	callOnServerAsync = <T extends (...args: any[]) => any>(method: T, args?: RpcArgsFor<T>): Promise<Awaited<ReturnType<T>>> => {
 		if (isServer) {
-			return Promise.reject(new Error('callOnServerAsync is only available in the live preview client runtime.'));
+			return Promise.reject(new Error('upstream proxy route not yet handled'));
 		}
 
 		this.__ensureMapped();
@@ -293,8 +226,6 @@ export abstract class NComponent {
 				this.render();
 			});
 		}
-
-		refreshClientUiBindings();
 	};
 
 	updateHtml = (selector: string, html: string) => {
@@ -309,7 +240,6 @@ export abstract class NComponent {
 			} else {
 				el.innerHTML = html;
 			}
-			refreshClientUiBindings();
 		} else {
 			console.warn(`[WS] updateHtml: element not found for selector: ${selector}`);
 		}
@@ -394,18 +324,6 @@ export abstract class NComponent {
 		}
 		return '';
 	}
-}
-
-function invokeHostHandler(handler: Function, args: unknown): unknown {
-	if (args == null) return handler();
-	if (Array.isArray(args)) return handler(...args);
-	return handler(args);
-}
-
-function invokeHostHandlerWithParent(handler: Function, parent: unknown, args: unknown): unknown {
-	if (args == null) return handler.call(parent);
-	if (Array.isArray(args)) return handler.call(parent, ...args);
-	return handler.call(parent, args);
 }
 
 function generateIDs(props: NComponentProps | undefined, name: string) {

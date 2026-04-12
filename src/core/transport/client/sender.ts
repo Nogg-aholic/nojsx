@@ -1,6 +1,6 @@
-import { nojsxWSEvent } from '../../protocol/events.js';
-import { encodeRpcValue } from '../../protocol/rpc-args.js';
+import { nojsxWSEvent } from '../events.js';
 import { sendBinary } from './connection.js';
+import { encodeRpcAwaitMessage, encodeRpcCallMessage, encodeRpcReturnMessage } from '@nogg-aholic/nrpc';
 
 const encoder = new TextEncoder();
 
@@ -30,60 +30,15 @@ function serializeRpcArgs(value: unknown): unknown {
 }
 
 export function sendRpcToServer(methodName: string, componentId: string, args: unknown): void {
-  const componentIdBytes = encoder.encode(componentId);
-  const methodNameBytes = encoder.encode(methodName);
-  const argsBytes = encodeRpcValue(serializeRpcArgs(args ?? null));
-
-  const buf = new Uint8Array(1 + 1 + componentIdBytes.length + 1 + methodNameBytes.length + argsBytes.length);
-  let offset = 0;
-  buf[offset++] = nojsxWSEvent.RPC_CALL;
-  buf[offset++] = componentIdBytes.length;
-  buf.set(componentIdBytes, offset);
-  offset += componentIdBytes.length;
-  buf[offset++] = methodNameBytes.length;
-  buf.set(methodNameBytes, offset);
-  offset += methodNameBytes.length;
-  buf.set(argsBytes, offset);
-
-  sendBinary(buf);
+  sendBinary(encodeRpcCallMessage(nojsxWSEvent.RPC_CALL, methodName, serializeRpcArgs(args ?? null), componentId));
 }
 
 export function sendRpcToServerAwait(methodName: string, componentId: string, args: unknown, requestId: number): void {
-  const componentIdBytes = encoder.encode(componentId);
-  const methodNameBytes = encoder.encode(methodName);
-  const argsBytes = encodeRpcValue(serializeRpcArgs(args ?? null));
-
-  const buf = new Uint8Array(1 + 4 + 1 + componentIdBytes.length + 1 + methodNameBytes.length + argsBytes.length);
-  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-
-  let offset = 0;
-  buf[offset++] = nojsxWSEvent.RPC_CALL_AWAIT;
-  view.setUint32(offset, requestId >>> 0, true);
-  offset += 4;
-  buf[offset++] = componentIdBytes.length;
-  buf.set(componentIdBytes, offset);
-  offset += componentIdBytes.length;
-  buf[offset++] = methodNameBytes.length;
-  buf.set(methodNameBytes, offset);
-  offset += methodNameBytes.length;
-  buf.set(argsBytes, offset);
-
-  sendBinary(buf);
+  sendBinary(encodeRpcAwaitMessage(nojsxWSEvent.RPC_CALL_AWAIT, requestId, methodName, serializeRpcArgs(args ?? null), componentId));
 }
 
 export function sendRpcReturnToServer(requestId: number, ok: boolean, payload: unknown): void {
-  const payloadBytes = encodeRpcValue(payload ?? null);
-  const buf = new Uint8Array(1 + 4 + 1 + payloadBytes.length);
-  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-
-  let offset = 0;
-  buf[offset++] = nojsxWSEvent.RPC_RETURN;
-  view.setUint32(offset, requestId >>> 0, true);
-  offset += 4;
-  buf[offset++] = ok ? 1 : 0;
-  buf.set(payloadBytes, offset);
-
-  sendBinary(buf);
+  sendBinary(encodeRpcReturnMessage(nojsxWSEvent.RPC_RETURN, requestId, ok, payload ?? null));
 }
 
 export function sendClientConstruct(componentId: string, parentId: string | null, componentName: string, componentKey?: string | null): void {

@@ -79,8 +79,8 @@ Minimal shape:
 
 ```tsx
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
-import type {} from "nojsx/core/types/index";
+import { NComponent } from "nojsx";
+import type {} from "nojsx";
 
 export interface PanelProps {
   title?: string;
@@ -200,8 +200,8 @@ Example interactive conversion:
 
 ```tsx
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
-import type {} from "nojsx/core/types/index";
+import { NComponent } from "nojsx";
+import type {} from "nojsx";
 
 export class Disclosure extends NComponent {
   open = false;
@@ -260,9 +260,8 @@ Use this when Stitch gives you repeated boxes with different bodies.
 
 ```tsx
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
-import type {} from "nojsx/core/types/index";
-import { join } from "nojsx/core/util/util";
+import { NComponent, join } from "nojsx";
+import type {} from "nojsx";
 
 export interface CardProps {
   title?: string;
@@ -322,9 +321,8 @@ Example:
 
 ```tsx
 /** @jsxImportSource nojsx */
-import { NComponent } from "nojsx/core/components/components";
-import type {} from "nojsx/core/types/index";
-import { createSlotGetter } from "nojsx/core/util/slots";
+import { NComponent, createSlotGetter } from "nojsx";
+import type {} from "nojsx";
 
 export class FramedPanel extends NComponent {
   private propsRef: any;
@@ -437,8 +435,7 @@ Typical split:
 
 ```tsx
 /** @jsxImportSource nojsx */
-import { ShellPageParent } from "nojsx/core/components/shell-page-parent";
-import { NavOutlet } from "nojsx/core/components/nav-outlet";
+import { ShellPageParent, NavOutlet } from "nojsx";
 import { AppChrome } from "./components/app-chrome";
 
 export default class ShellPage extends ShellPageParent {

@@ -5,6 +5,7 @@ let connectPromise: Promise<void> | null = null;
 
 type nojsxConnectionGlobals = typeof globalThis & {
   __nojsxDisableWebSocket?: boolean;
+  // build script sets this onto shell
   __nojsxWebSocketUrl?: string;
   __nojsxWebSocketFailed?: boolean;
 };
@@ -13,19 +14,7 @@ function getConnectionGlobals(): nojsxConnectionGlobals {
   return globalThis as nojsxConnectionGlobals;
 }
 
-function isLikelyWebviewRuntime(): boolean {
-  if (typeof window === 'undefined' || typeof location === 'undefined') return false;
-  const href = String(location.href || '').toLowerCase();
-  const protocol = String(location.protocol || '').toLowerCase();
-  return protocol === 'vscode-webview:'
-    || protocol === 'vscode-file:'
-    || href.includes('purpose=webviewview')
-    || href.includes('vscode-resource-base-authority=')
-    || href.includes('parentorigin=vscode-file');
-}
-
-function resolveSocketUrl(explicitUrl?: string): string | undefined {
-  if (explicitUrl) return explicitUrl;
+function resolveSocketUrl(): string | undefined {
   const g = getConnectionGlobals();
   if (typeof g.__nojsxWebSocketUrl === 'string' && g.__nojsxWebSocketUrl.length > 0) {
     return g.__nojsxWebSocketUrl;
@@ -38,7 +27,7 @@ function resolveSocketUrl(explicitUrl?: string): string | undefined {
   return undefined;
 }
 
-export function connect(url?: string): Promise<void> {
+export function connect(): Promise<void> {
   const g = getConnectionGlobals();
   if (g.__nojsxDisableWebSocket || g.__nojsxWebSocketFailed) {
     return Promise.resolve();
@@ -49,13 +38,9 @@ export function connect(url?: string): Promise<void> {
   if (connectPromise) {
     return connectPromise;
   }
-  url = resolveSocketUrl(url);
 
+  const url = resolveSocketUrl(); 
   if (!url) {
-    if (isLikelyWebviewRuntime()) {
-      g.__nojsxDisableWebSocket = true;
-      return Promise.resolve();
-    }
     return Promise.reject(new Error('WebSocket URL required on server'));
   }
 
@@ -64,12 +49,6 @@ export function connect(url?: string): Promise<void> {
     	ws = new WebSocket(url);
     } catch (error) {
       connectPromise = null;
-      if (isLikelyWebviewRuntime()) {
-        g.__nojsxDisableWebSocket = true;
-        g.__nojsxWebSocketFailed = true;
-        resolve();
-        return;
-      }
       reject(error instanceof Error ? error : new Error(String(error)));
       return;
     }
@@ -85,13 +64,6 @@ export function connect(url?: string): Promise<void> {
 
     ws.onerror = () => {
       connectPromise = null;
-      if (isLikelyWebviewRuntime()) {
-        g.__nojsxDisableWebSocket = true;
-        g.__nojsxWebSocketFailed = true;
-        ws = null;
-        resolve();
-        return;
-      }
       reject(new Error('WebSocket error'));
     };
 
@@ -135,7 +107,7 @@ export function sendBinary(data: Uint8Array): void {
   ws.send(payload);
 }
 
-export async function ensureConnected(url?: string): Promise<void> {
+export async function ensureConnected(): Promise<void> {
   if (isConnected()) return;
-  await connect(url);
+  await connect();
 }

@@ -1,7 +1,7 @@
 import { stateCache, stateHydratedKeys, stateSyncCallbacks } from '../../components/components.js';
-import { componentRegistry, type nojsxGlobals } from '../../global/registry.js';
-import { nojsxWSEvent } from '../../protocol/events.js';
-import { decodeRpcValue } from '../../protocol/rpc-args.js';
+import { componentRegistry, type nojsxGlobals } from '../../components/registry.js';
+import { nojsxWSEvent } from '../events.js';
+import { decodeRpcAwaitMessage, decodeRpcCallMessage, decodeRpcReturnMessage, decodeRpcValue } from '@nogg-aholic/nrpc';
 import { applyComponentSnapshot } from '../../util/component-snapshot.js';
 import { sendRpcReturnToServer } from './sender.js';
 
@@ -89,32 +89,15 @@ function invokeClientMethod(componentId: string, methodName: string, decoded: un
 }
 
 function handleRpcFromServer(data: Uint8Array): void {
-  let offset = 1;
-  const componentIdLen = data[offset++];
-  const componentId = decoder.decode(data.subarray(offset, offset + componentIdLen));
-  offset += componentIdLen;
-  const methodNameLen = data[offset++];
-  const methodName = decoder.decode(data.subarray(offset, offset + methodNameLen));
-  offset += methodNameLen;
-  const [decoded] = decodeRpcValue(data, offset);
-  invokeClientMethod(componentId, methodName, decoded);
+  const { componentId, methodName, args } = decodeRpcCallMessage(data, nojsxWSEvent.RPC_CALL_S2C);
+  invokeClientMethod(componentId, methodName, args);
 }
 
 async function handleRpcAwaitFromServer(data: Uint8Array): Promise<void> {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let offset = 1;
-  const requestId = view.getUint32(offset, true);
-  offset += 4;
-  const componentIdLen = data[offset++];
-  const componentId = decoder.decode(data.subarray(offset, offset + componentIdLen));
-  offset += componentIdLen;
-  const methodNameLen = data[offset++];
-  const methodName = decoder.decode(data.subarray(offset, offset + methodNameLen));
-  offset += methodNameLen;
+  const { requestId, componentId, methodName, args } = decodeRpcAwaitMessage(data, nojsxWSEvent.RPC_CALL_AWAIT_S2C);
 
   try {
-    const [decoded] = decodeRpcValue(data, offset);
-    const result = await invokeClientMethod(componentId, methodName, decoded);
+    const result = await invokeClientMethod(componentId, methodName, args);
     sendRpcReturnToServer(requestId, true, result ?? null);
   } catch (error) {
     sendRpcReturnToServer(requestId, false, String((error as Error)?.message ?? error));
@@ -122,14 +105,10 @@ async function handleRpcAwaitFromServer(data: Uint8Array): Promise<void> {
 }
 
 function handleRpcReturnFromServer(data: Uint8Array): void {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let offset = 1;
-  const requestId = view.getUint32(offset, true);
-  offset += 4;
-  const ok = data[offset++] === 1;
+  const { requestId, ok } = decodeRpcReturnMessage(data, nojsxWSEvent.RPC_RETURN_S2C);
   let payload: unknown;
   try {
-    [payload] = decodeRpcValue(data, offset);
+    ({ payload } = decodeRpcReturnMessage(data, nojsxWSEvent.RPC_RETURN_S2C));
   } catch (error) {
     payload = String((error as Error)?.message ?? error);
   }

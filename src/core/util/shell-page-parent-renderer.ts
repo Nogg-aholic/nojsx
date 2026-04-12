@@ -1,4 +1,4 @@
-import type { ShellPageParentProps } from "./shell-page-parent.js";
+import type { ShellPageParentProps } from "../components/shell-page-parent.js";
 
 export const defaultShellPageParentProviderScripts = [
   `<script>`,

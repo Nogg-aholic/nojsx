@@ -13,15 +13,9 @@ type __nojsxJsxDevFn = (
   _source?: any,
   _self?: any
 ) => string;
-type __nojsxLivePreviewJsxFn = (
-  tag: string | Function | symbol,
-  props?: JSX.HtmlTag,
-  options?: { mount?: string | Element }
-) => string;
 type __nojsxPreviewRenderDocumentFn = (html: string) => void;
-type __nojsxGetLivePreviewHtmlFn = () => Promise<string>;
-type __nojsxIsLivePreviewModeFn = () => boolean;
 type __nojsxEditorFn = (entry: Function, props?: Record<string, unknown>) => string;
+type __nojsxNavHandlerFn = (resolvedPath: string) => boolean | void;
 type __nojsxPromiseLikeKeys = 'then' | 'catch' | 'finally';
 type __nojsxRpcify<T> =
   T extends (...args: infer A) => infer R
@@ -30,17 +24,9 @@ type __nojsxRpcify<T> =
       ? { [K in keyof T as K extends __nojsxPromiseLikeKeys ? never : K]: __nojsxRpcify<T[K]> }
       : T;
 
-type __nojsxVscodeRpcApi = __nojsxRpcify<typeof import('vscode')>;
 type __nojsxRpcSymbolRef = { __nojsxRpcName?: string };
 
 export type IntrinsicRenderer = (props?: any) => any;
-
-export type __nojsxSlotCaptureToken = {
-  id: number;
-  rootName: string;
-  component: unknown;
-  parentId: string | null;
-};
 
 export type nojsxNavState = {
   path: string;
@@ -50,7 +36,7 @@ export type nojsxNavState = {
   params?: Record<string, string>;
 };
 
-declare type ComponentInstance = import('nojsx/core/components/components').NComponent;
+declare type ComponentInstance = import('../../index.js').NComponent;
 
 export type ExtractParamKeys<T extends string> = T extends `${string}[${infer Param}]${infer Rest}`
   ? Param | ExtractParamKeys<Rest>
@@ -70,10 +56,6 @@ export type ShellBridgeExtended = ComponentInstance & {
 
 declare global {
   var g: GlobalThis;
-  var vscode: __nojsxVscodeRpcApi;
-  var getDocs: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<import('nojsx/core/transport/server/upstream-host-openapi').HostOpenApiDocument>) & { __nojsxRpcName?: string };
-  var getDocsHtml: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<string>) & { __nojsxRpcName?: string };
-
   namespace JSX {
     type Element = string;
 
@@ -82,7 +64,7 @@ declare global {
       children?: unknown;
     }
 
-    type HandlerThis = import('nojsx/core/components/components').NComponent & { [key: string]: any };
+    type HandlerThis = import('../../index.js').NComponent & { [key: string]: any };
 
     interface HtmlTag {
       children?: unknown;
@@ -125,14 +107,11 @@ declare global {
 
 export interface nojsxComponent {
   template: ((props: any) => any) | string;
-  __nojsxNoSlotCapture?: boolean;
   slots?: Array<nojsxComponent>;
 }
 
 declare global {
   interface GlobalThis {
-    getDocs?: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<import('nojsx/core/transport/server/upstream-host-openapi').HostOpenApiDocument>) & { __nojsxRpcName?: string };
-    getDocsHtml?: ((symbolOrReference: __nojsxRpcSymbolRef) => Promise<string>) & { __nojsxRpcName?: string };
     __currentComponentId?: string | null;
 
     __nojsxInlineHandlerNextId?: number;
@@ -140,55 +119,87 @@ declare global {
     __nojsxInlineHandlersByComponent?: Map<string, Set<string>>;
     __nojsxDelegatedEventsBound?: boolean;
 
-    __nojsxSlotCaptureWired?: boolean;
-    __nojsxSlotCaptureNextId?: number;
-    __nojsxSlotCaptureStack?: __nojsxSlotCaptureToken[];
-    __nojsxSlotCaptureData?: Map<number, Record<string, string>>;
-    __nojsxDebugSlots?: boolean;
-
-    __nojsxInsideIntrinsic?: string;
-
     __nojsxNav?: nojsxNavState;
     __nojsxNavOutlet?: ComponentInstance;
     __nojsxPageRoutes?: Record<string, { componentName: string }>;
     __nojsxPages?: Record<string, string>;
-
-    n: Record<string, unknown>;
     __nojsx_jsx_impl?: __nojsxJsxFn;
     __nojsx_jsxs_impl?: __nojsxJsxFn;
     __nojsx_jsxDEV_impl?: __nojsxJsxDevFn;
-    __livePreviewMode?: boolean;
-    __nojsxDevPreviewMode?: boolean;
-    __livePreviewRequestPath?: string;
+   
     Fragment?: symbol;
     jsx?: __nojsxJsxFn;
     jsxs?: __nojsxJsxFn;
     jsxDEV?: __nojsxJsxDevFn;
     _jsxDEV?: __nojsxJsxDevFn;
-    livePreviewJSX?: __nojsxLivePreviewJsxFn;
-    getLivePreviewHtml?: __nojsxGetLivePreviewHtmlFn;
-    isLivePreviewMode?: __nojsxIsLivePreviewModeFn;
-    NComponent?: typeof import('nojsx/core/components/components').NComponent;
-    renderPreviewDocument?: __nojsxPreviewRenderDocumentFn;
-    jsxEditor?: __nojsxEditorFn;
-    live_preview?: boolean;
-    __livePreview?: {
-      filePath?: string;
-      sourceText?: string;
-      serverProcessRef?: string;
-      serverSessionId?: string;
-      hostCapabilities?: Record<string, unknown>;
-      workingDirectory?: string;
-      projectRoot?: string;
-      requestPath?: string;
-      tempDir?: string;
-      outputPath?: string;
-      httpPort?: number;
-      precomputedHtml?: string;
-      mode?: string;
-    };
-    __livePreviewHtml?: string;
+    NComponent?: typeof import('../../index.js').NComponent;
+    navHandler?: __nojsxNavHandlerFn;
   }
 }
+export const g = globalThis as unknown as GlobalThis;
 
 export {};
+
+type __nojsxInjectedRpcSymbolRef = { __nojsxRpcName?: string };
+type __nojsxInjectedHostOpenApiSchema = {
+  type?: string;
+  description?: string;
+  items?: __nojsxInjectedHostOpenApiSchema;
+  properties?: Record<string, __nojsxInjectedHostOpenApiSchema>;
+  required?: string[];
+  anyOf?: __nojsxInjectedHostOpenApiSchema[];
+  enum?: Array<string | number | boolean | null>;
+};
+export type __nojsxInjectedHostOpenApiDocument = {
+  openapi: '3.1.0';
+  info: {
+    title: string;
+    version: string;
+  };
+  paths: Record<
+    string,
+    {
+      post: {
+        operationId: string;
+        summary?: string;
+        description?: string;
+        requestBody: {
+          required: boolean;
+          content: {
+            'application/json': {
+              schema: __nojsxInjectedHostOpenApiSchema;
+            };
+          };
+        };
+        responses: {
+          '200': {
+            description: string;
+            content: {
+              'application/json': {
+                schema: __nojsxInjectedHostOpenApiSchema;
+              };
+            };
+          };
+        };
+      };
+    }
+  >;
+};
+type __nojsxInjectedVscodeRpcApi = __nojsxInjectedRpcify<Record<string, unknown>>;
+type __nojsxInjectedPromiseLikeKeys = 'then' | 'catch' | 'finally';
+type __nojsxInjectedRpcify<T> =
+  T extends (...args: infer A) => infer R
+    ? ((...args: A) => Promise<Awaited<R>>) & { __nojsxRpcName?: string }
+    : T extends object
+      ? { [K in keyof T as K extends __nojsxInjectedPromiseLikeKeys ? never : K]: __nojsxInjectedRpcify<T[K]> }
+      : T;
+
+declare global {
+  var vscode: __nojsxInjectedVscodeRpcApi;
+  var getDocs:
+    ((symbolOrReference: __nojsxInjectedRpcSymbolRef) => Promise<__nojsxInjectedHostOpenApiDocument>)
+    & { __nojsxRpcName?: string };
+  var getDocsHtml:
+    ((symbolOrReference: __nojsxInjectedRpcSymbolRef) => Promise<string>)
+    & { __nojsxRpcName?: string };
+}

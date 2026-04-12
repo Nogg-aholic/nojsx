@@ -1,6 +1,6 @@
 import { NComponent, NComponentProps } from "./components.js";
-import { nojsxComponentLoaders } from "../global/registry.js";
-import { renderShellPageParentDocument } from "./shell-page-parent-renderer.js";
+import { nojsxComponentLoaders } from "../components/registry.js";
+import { renderShellPageParentDocument } from "../util/shell-page-parent-renderer.js";
 
 export interface ShellPageParentDocumentProps {
   title: string;

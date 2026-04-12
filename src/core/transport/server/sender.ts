@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun';
-import { nojsxWSEvent } from '../../protocol/events.js';
-import { encodeRpcValue } from '../../protocol/rpc-args.js';
+import { encodeRpcAwaitMessage, encodeRpcCallMessage, encodeRpcReturnMessage, encodeRpcValue } from '@nogg-aholic/nrpc';
+import { nojsxWSEvent } from '../events.js';
 
 const encoder = new TextEncoder();
 
@@ -46,18 +46,7 @@ function broadcast(payload: Uint8Array): void {
 }
 
 export function sendRpcReturn(requestId: number, ok: boolean, payload: unknown, targetSocket?: ServerWebSocket<unknown> | null): void {
-  const payloadBytes = encodeRpcValue(payload ?? null);
-  const buf = new Uint8Array(1 + 4 + 1 + payloadBytes.length);
-  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-
-  let offset = 0;
-  buf[offset++] = nojsxWSEvent.RPC_RETURN_S2C;
-  view.setUint32(offset, requestId >>> 0, true);
-  offset += 4;
-  buf[offset++] = ok ? 1 : 0;
-  buf.set(payloadBytes, offset);
-
-  sendToSocket(targetSocket ?? getSocket(), buf);
+  sendToSocket(targetSocket ?? getSocket(), encodeRpcReturnMessage(nojsxWSEvent.RPC_RETURN_S2C, requestId, ok, payload ?? null));
 }
 
 export function sendRenderComponent(componentId: string): void {
@@ -127,42 +116,9 @@ export function sendUpdateHtml(componentId: string, selector: string, html: stri
 }
 
 export function sendRpcCall(componentId: string, methodName: string, args: unknown): void {
-  const componentIdBytes = encoder.encode(componentId);
-  const methodNameBytes = encoder.encode(methodName);
-  const argsBytes = encodeRpcValue(args ?? null);
-  const buf = new Uint8Array(1 + 1 + componentIdBytes.length + 1 + methodNameBytes.length + argsBytes.length);
-
-  let offset = 0;
-  buf[offset++] = nojsxWSEvent.RPC_CALL_S2C;
-  buf[offset++] = componentIdBytes.length;
-  buf.set(componentIdBytes, offset);
-  offset += componentIdBytes.length;
-  buf[offset++] = methodNameBytes.length;
-  buf.set(methodNameBytes, offset);
-  offset += methodNameBytes.length;
-  buf.set(argsBytes, offset);
-
-  broadcast(buf);
+  broadcast(encodeRpcCallMessage(nojsxWSEvent.RPC_CALL_S2C, methodName, args ?? null, componentId));
 }
 
 export function sendRpcCallAwait(componentId: string, methodName: string, args: unknown, requestId: number): void {
-  const componentIdBytes = encoder.encode(componentId);
-  const methodNameBytes = encoder.encode(methodName);
-  const argsBytes = encodeRpcValue(args ?? null);
-  const buf = new Uint8Array(1 + 4 + 1 + componentIdBytes.length + 1 + methodNameBytes.length + argsBytes.length);
-  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-
-  let offset = 0;
-  buf[offset++] = nojsxWSEvent.RPC_CALL_AWAIT_S2C;
-  view.setUint32(offset, requestId >>> 0, true);
-  offset += 4;
-  buf[offset++] = componentIdBytes.length;
-  buf.set(componentIdBytes, offset);
-  offset += componentIdBytes.length;
-  buf[offset++] = methodNameBytes.length;
-  buf.set(methodNameBytes, offset);
-  offset += methodNameBytes.length;
-  buf.set(argsBytes, offset);
-
-  broadcast(buf);
+  broadcast(encodeRpcAwaitMessage(nojsxWSEvent.RPC_CALL_AWAIT_S2C, requestId, methodName, args ?? null, componentId));
 }

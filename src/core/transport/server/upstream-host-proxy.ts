@@ -1,12 +1,38 @@
-import { nojsxWSEvent } from '../../protocol/events.js';
-import { decodeRpcValue, encodeRpcValue } from '../../protocol/rpc-args.js';
+import { decodeRpcReturnMessage, encodeRpcAwaitMessage} from '@nogg-aholic/nrpc';
+import { nojsxWSEvent } from '../events.js';
+
+type PendingUpstreamRequest = {
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+};
 
 type UpstreamGlobals = typeof globalThis & {
   __nojsxUpstreamHostRpcEndpoint?: string;
   __nojsxResolvedUpstreamHostRpcEndpoint?: string;
   __nojsxUpstreamHostRpcWsEndpoint?: string;
   __nojsxResolvedUpstreamHostRpcWsEndpoint?: string;
+  __nojsxUpstreamHostRpcEndpoints?: Record<string, string>;
+  __nojsxResolvedUpstreamHostRpcEndpoints?: Record<string, string>;
+  __nojsxUpstreamHostRpcWsEndpoints?: Record<string, string>;
+  __nojsxResolvedUpstreamHostRpcWsEndpoints?: Record<string, string>;
 };
+
+export type UpstreamHostRpcConfig = {
+  rpcEndpoint?: string;
+  wsEndpoint?: string;
+};
+
+type UpstreamConnectionState = {
+  socket: WebSocket | null;
+  socketEndpoint: string | null;
+  connectPromise: Promise<void> | null;
+  nextRequestId: number;
+  pendingRequests: Map<number, PendingUpstreamRequest>;
+};
+
+const upstreamConnections = new Map<string, UpstreamConnectionState>();
+
+
 
 function normalizeHostArgs(args: unknown): unknown[] {
   if (args == null) return [];
@@ -14,222 +40,75 @@ function normalizeHostArgs(args: unknown): unknown[] {
   return [args];
 }
 
-export function getUpstreamHostRpcEndpoint(): string {
+function getUpstreamConnectionState(upstreamId: string): UpstreamConnectionState {
+  let state = upstreamConnections.get(upstreamId);
+  if (state) {
+    return state;
+  }
+  state = {
+    socket: null,
+    socketEndpoint: null,
+    connectPromise: null,
+    nextRequestId: 1,
+    pendingRequests: new Map<number, PendingUpstreamRequest>(),
+  };
+  upstreamConnections.set(upstreamId, state);
+  return state;
+}
+
+function getUpstreamHostRpcEndpoint(upstreamId: string): string {
   const globals = globalThis as UpstreamGlobals;
-  const resolvedEndpoint = globals.__nojsxResolvedUpstreamHostRpcEndpoint;
+  const resolvedEndpoint = globals.__nojsxResolvedUpstreamHostRpcEndpoints?.[upstreamId]
+    ?? (upstreamId === 'default' ? globals.__nojsxResolvedUpstreamHostRpcEndpoint : undefined);
   if (typeof resolvedEndpoint === 'string' && resolvedEndpoint.length > 0) {
     return resolvedEndpoint;
   }
-  const globalEndpoint = globals.__nojsxUpstreamHostRpcEndpoint;
+  const globalEndpoint = globals.__nojsxUpstreamHostRpcEndpoints?.[upstreamId]
+    ?? (upstreamId === 'default' ? globals.__nojsxUpstreamHostRpcEndpoint : undefined);
   if (typeof globalEndpoint === 'string' && globalEndpoint.length > 0) {
     return globalEndpoint;
   }
 
-  const envEndpoint = typeof process === 'undefined' ? undefined : process.env.NOJSX_UPSTREAM_HOST_RPC_ENDPOINT;
-  if (typeof envEndpoint === 'string' && envEndpoint.length > 0) {
-    return envEndpoint;
-  }
-
-  return 'http://127.0.0.1:43111/rpc';
+  throw new Error('Upstream host RPC endpoint is not configured. Set it from server startup before connecting.');
 }
 
-export async function resolveUpstreamHostRpcEndpoint(): Promise<string> {
+async function resolveUpstreamHostRpcEndpoint(upstreamId: string): Promise<string> {
   const globals = globalThis as UpstreamGlobals;
-  const knownEndpoint = getUpstreamHostRpcEndpoint();
-  if (knownEndpoint !== 'http://127.0.0.1:43111/rpc') {
+  const knownEndpoint = getUpstreamHostRpcEndpoint(upstreamId);
+  globals.__nojsxResolvedUpstreamHostRpcEndpoints = globals.__nojsxResolvedUpstreamHostRpcEndpoints ?? {};
+  globals.__nojsxResolvedUpstreamHostRpcEndpoints[upstreamId] = knownEndpoint;
+  if (upstreamId === 'default') {
     globals.__nojsxResolvedUpstreamHostRpcEndpoint = knownEndpoint;
-    return knownEndpoint;
   }
-
-  if (typeof window !== 'undefined') {
-    return knownEndpoint;
-  }
-
-  const discovered = await discoverInstalledProxyRpcEndpoint();
-  const resolved = discovered ?? knownEndpoint;
-  globals.__nojsxResolvedUpstreamHostRpcEndpoint = resolved;
-  return resolved;
+  return knownEndpoint;
 }
 
-export function getUpstreamHostRpcWsEndpoint(): string {
+async function resolveUpstreamHostRpcWsEndpoint(upstreamId: string): Promise<string> {
   const globals = globalThis as UpstreamGlobals;
-  const resolvedEndpoint = globals.__nojsxResolvedUpstreamHostRpcWsEndpoint;
-  if (typeof resolvedEndpoint === 'string' && resolvedEndpoint.length > 0) {
-    return resolvedEndpoint;
+  const resolved = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints?.[upstreamId]
+    ?? (upstreamId === 'default' ? globals.__nojsxResolvedUpstreamHostRpcWsEndpoint : undefined);
+  if (typeof resolved === 'string' && resolved.length > 0) {
+    return resolved;
   }
 
-  const globalEndpoint = globals.__nojsxUpstreamHostRpcWsEndpoint;
-  if (typeof globalEndpoint === 'string' && globalEndpoint.length > 0) {
-    return globalEndpoint;
-  }
-
-  const derived = deriveWsEndpoint(getUpstreamHostRpcEndpoint());
-  globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = derived;
-  return derived;
-}
-
-export async function resolveUpstreamHostRpcWsEndpoint(): Promise<string> {
-  const globals = globalThis as UpstreamGlobals;
-  const explicit = globals.__nojsxUpstreamHostRpcWsEndpoint;
+  const explicit = globals.__nojsxUpstreamHostRpcWsEndpoints?.[upstreamId]
+    ?? (upstreamId === 'default' ? globals.__nojsxUpstreamHostRpcWsEndpoint : undefined);
   if (typeof explicit === 'string' && explicit.length > 0) {
-    globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = explicit;
+    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints ?? {};
+    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = explicit;
+    if (upstreamId === 'default') {
+      globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = explicit;
+    }
     return explicit;
   }
 
-  const discovered = await discoverInstalledProxyWsEndpoint();
-  const resolved = discovered ?? deriveWsEndpoint(await resolveUpstreamHostRpcEndpoint());
-  globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = resolved;
-  return resolved;
-}
-
-async function discoverInstalledProxyRpcEndpoint(): Promise<string | null> {
-  try {
-    const [{ readFile }, os, path] = await Promise.all([
-      import('node:fs/promises'),
-      import('node:os'),
-      import('node:path'),
-    ]);
-    const candidates = [
-      path.join(os.homedir(), 'AppData', 'Roaming', 'Code - Insiders', 'User', 'globalStorage', 'local.vscode-api-proxy', 'server-info.json'),
-      path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'local.vscode-api-proxy', 'server-info.json'),
-    ];
-
-    for (const filePath of candidates) {
-      try {
-        const raw = await readFile(filePath, 'utf8');
-        const parsed = JSON.parse(raw) as { rpcEndpoint?: unknown };
-        if (typeof parsed.rpcEndpoint === 'string' && parsed.rpcEndpoint.length > 0) {
-          return parsed.rpcEndpoint;
-        }
-      } catch {
-        // Ignore invalid or transient files.
-      }
-    }
-  } catch {
-    // Ignore environments without node builtins.
+  const nextResolved = deriveWsEndpoint(await resolveUpstreamHostRpcEndpoint(upstreamId));
+  globals.__nojsxResolvedUpstreamHostRpcWsEndpoints = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints ?? {};
+  globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = nextResolved;
+  if (upstreamId === 'default') {
+    globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = nextResolved;
   }
-
-  return null;
-}
-
-async function discoverInstalledProxyWsEndpoint(): Promise<string | null> {
-  try {
-    const [{ readFile }, os, path] = await Promise.all([
-      import('node:fs/promises'),
-      import('node:os'),
-      import('node:path'),
-    ]);
-    const candidates = [
-      path.join(os.homedir(), 'AppData', 'Roaming', 'Code - Insiders', 'User', 'globalStorage', 'local.vscode-api-proxy', 'server-info.json'),
-      path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'local.vscode-api-proxy', 'server-info.json'),
-    ];
-
-    for (const filePath of candidates) {
-      try {
-        const raw = await readFile(filePath, 'utf8');
-        const parsed = JSON.parse(raw) as { wsRpcEndpoint?: unknown; rpcEndpoint?: unknown };
-        if (typeof parsed.wsRpcEndpoint === 'string' && parsed.wsRpcEndpoint.length > 0) {
-          return parsed.wsRpcEndpoint;
-        }
-        if (typeof parsed.rpcEndpoint === 'string' && parsed.rpcEndpoint.length > 0) {
-          return deriveWsEndpoint(parsed.rpcEndpoint);
-        }
-      } catch {
-        // Ignore invalid or transient files.
-      }
-    }
-  } catch {
-    // Ignore environments without node builtins.
-  }
-
-  return null;
-}
-
-export async function invokeUpstreamHostRpcPath(path: readonly string[], args: readonly unknown[] = []): Promise<unknown> {
-  if (!path.length) {
-    throw new Error('Upstream host RPC path cannot be empty.');
-  }
-
-  const endpoint = await resolveUpstreamHostRpcWsEndpoint();
-  const methodName = path.join('.');
-
-  return new Promise<unknown>((resolve, reject) => {
-    const socket = new WebSocket(endpoint);
-    socket.binaryType = 'arraybuffer';
-    const requestId = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    let settled = false;
-
-    const fail = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      try {
-        socket.close();
-      } catch {
-        // ignore close errors
-      }
-      reject(error);
-    };
-
-    const succeed = (value: unknown) => {
-      if (settled) return;
-      settled = true;
-      try {
-        socket.close();
-      } catch {
-        // ignore close errors
-      }
-      resolve(value);
-    };
-
-    socket.onopen = () => {
-      try {
-        socket.send(Uint8Array.from(encodeRpcAwaitMessage(requestId, methodName, [...args])));
-      } catch (error) {
-        fail(error instanceof Error ? error : new Error(String(error)));
-      }
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const payload = new Uint8Array(event.data);
-        const response = decodeRpcReturnMessage(payload);
-        if (response.requestId !== requestId) {
-          return;
-        }
-        if (!response.ok) {
-          fail(new Error(String(response.payload)));
-          return;
-        }
-        succeed(response.payload);
-      } catch (error) {
-        fail(error instanceof Error ? error : new Error(String(error)));
-      }
-    };
-
-    socket.onerror = () => {
-      fail(new Error(`Upstream host RPC websocket failed: ${endpoint}`));
-    };
-
-    socket.onclose = () => {
-      if (!settled) {
-        fail(new Error(`Upstream host RPC websocket closed before response: ${endpoint}`));
-      }
-    };
-  });
-}
-
-export async function invokeUpstreamHostRpc(methodName: string, args: unknown): Promise<unknown> {
-  const path = methodName.split('.').filter(Boolean);
-  if (path.length === 0) {
-    throw new Error('Upstream host RPC path cannot be empty.');
-  }
-
-  const normalizedPath = path[0] === 'vscode' ? path.slice(1) : path;
-  if (normalizedPath.length === 0) {
-    throw new Error('Upstream host RPC path cannot target only the vscode root namespace.');
-  }
-
-  return invokeUpstreamHostRpcPath(normalizedPath, normalizeHostArgs(args));
+  return nextResolved;
 }
 
 function deriveWsEndpoint(httpEndpoint: string): string {
@@ -241,37 +120,226 @@ function deriveWsEndpoint(httpEndpoint: string): string {
   return url.toString();
 }
 
-function encodeRpcAwaitMessage(requestId: number, methodName: string, args: unknown): Uint8Array {
-  const encoder = new TextEncoder();
-  const componentIdBytes = encoder.encode('');
-  const methodNameBytes = encoder.encode(methodName);
-  const argsBytes = encodeRpcValue(args ?? null);
-  const buf = new Uint8Array(1 + 4 + 1 + componentIdBytes.length + 1 + methodNameBytes.length + argsBytes.length);
-  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-
-  let offset = 0;
-  buf[offset++] = nojsxWSEvent.RPC_CALL_AWAIT;
-  view.setUint32(offset, requestId >>> 0, true);
-  offset += 4;
-  buf[offset++] = componentIdBytes.length;
-  buf.set(componentIdBytes, offset);
-  offset += componentIdBytes.length;
-  buf[offset++] = methodNameBytes.length;
-  buf.set(methodNameBytes, offset);
-  offset += methodNameBytes.length;
-  buf.set(argsBytes, offset);
-
-  return buf;
+export function configureUpstreamHostRpc(upstreamId: string, config: UpstreamHostRpcConfig): void {
+  const globals = globalThis as UpstreamGlobals;
+  globals.__nojsxUpstreamHostRpcEndpoints = globals.__nojsxUpstreamHostRpcEndpoints ?? {};
+  globals.__nojsxResolvedUpstreamHostRpcEndpoints = globals.__nojsxResolvedUpstreamHostRpcEndpoints ?? {};
+  globals.__nojsxUpstreamHostRpcWsEndpoints = globals.__nojsxUpstreamHostRpcWsEndpoints ?? {};
+  globals.__nojsxResolvedUpstreamHostRpcWsEndpoints = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints ?? {};
+  if (typeof config.rpcEndpoint === 'string' && config.rpcEndpoint.length > 0) {
+    globals.__nojsxUpstreamHostRpcEndpoints[upstreamId] = config.rpcEndpoint;
+    globals.__nojsxResolvedUpstreamHostRpcEndpoints[upstreamId] = config.rpcEndpoint;
+    if (upstreamId === 'default') {
+      globals.__nojsxUpstreamHostRpcEndpoint = config.rpcEndpoint;
+      globals.__nojsxResolvedUpstreamHostRpcEndpoint = config.rpcEndpoint;
+    }
+  }
+  if (typeof config.wsEndpoint === 'string' && config.wsEndpoint.length > 0) {
+    globals.__nojsxUpstreamHostRpcWsEndpoints[upstreamId] = config.wsEndpoint;
+    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = config.wsEndpoint;
+    if (upstreamId === 'default') {
+      globals.__nojsxUpstreamHostRpcWsEndpoint = config.wsEndpoint;
+      globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = config.wsEndpoint;
+    }
+  } else if (typeof config.rpcEndpoint === 'string' && config.rpcEndpoint.length > 0) {
+    const wsEndpoint = deriveWsEndpoint(config.rpcEndpoint);
+    globals.__nojsxUpstreamHostRpcWsEndpoints[upstreamId] = wsEndpoint;
+    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = wsEndpoint;
+    if (upstreamId === 'default') {
+      globals.__nojsxUpstreamHostRpcWsEndpoint = wsEndpoint;
+      globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = wsEndpoint;
+    }
+  }
 }
 
-function decodeRpcReturnMessage(data: Uint8Array): { requestId: number; ok: boolean; payload: unknown } {
-  if (data[0] !== nojsxWSEvent.RPC_RETURN_S2C) {
-    throw new Error(`Unexpected upstream RPC event: ${data[0]}`);
+function rejectPendingUpstreamRequests(state: UpstreamConnectionState, error: Error): void {
+  for (const [requestId, pending] of Array.from(state.pendingRequests.entries())) {
+    state.pendingRequests.delete(requestId);
+    pending.reject(error);
+  }
+}
+
+function clearUpstreamSocketState(state: UpstreamConnectionState): void {
+  state.socket = null;
+  state.socketEndpoint = null;
+  state.connectPromise = null;
+}
+
+function nextUpstreamRequestId(state: UpstreamConnectionState): number {
+  const requestId = state.nextRequestId >>> 0;
+  state.nextRequestId = (requestId + 1) >>> 0;
+  return requestId;
+}
+
+function attachUpstreamSocketHandlers(state: UpstreamConnectionState, socket: WebSocket, endpoint: string): void {
+  socket.binaryType = 'arraybuffer';
+
+  socket.onmessage = (event) => {
+    try {
+      const payload = new Uint8Array(event.data);
+      const response = decodeRpcReturnMessage(payload, nojsxWSEvent.RPC_RETURN_S2C);
+      const pending = state.pendingRequests.get(response.requestId);
+      if (!pending) {
+        return;
+      }
+
+      state.pendingRequests.delete(response.requestId);
+      if (!response.ok) {
+        pending.reject(new Error(String(response.payload)));
+        return;
+      }
+      pending.resolve(response.payload);
+    } catch (error) {
+      const message = error instanceof Error ? error : new Error(String(error));
+      rejectPendingUpstreamRequests(state, message);
+    }
+  };
+
+  socket.onerror = () => {
+    const error = new Error(`Upstream host RPC websocket failed: ${endpoint}`);
+    rejectPendingUpstreamRequests(state, error);
+  };
+
+  socket.onclose = () => {
+    const error = new Error(`Upstream host RPC websocket closed: ${endpoint}`);
+    clearUpstreamSocketState(state);
+    rejectPendingUpstreamRequests(state, error);
+  };
+}
+
+export async function connectUpstreamHostRpc(upstreamId = 'default'): Promise<void> {
+  const state = getUpstreamConnectionState(upstreamId);
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    return;
   }
 
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const requestId = view.getUint32(1, true);
-  const ok = data[5] === 1;
-  const [payload] = decodeRpcValue(data, 6);
-  return { requestId, ok, payload };
+  if (state.connectPromise) {
+    return state.connectPromise;
+  }
+
+  state.connectPromise = (async () => {
+    const endpoint = await resolveUpstreamHostRpcWsEndpoint(upstreamId);
+
+    if (state.socket && state.socket.readyState === WebSocket.OPEN && state.socketEndpoint === endpoint) {
+      return;
+    }
+
+    if (state.socket && state.socket.readyState === WebSocket.CONNECTING && state.socketEndpoint === endpoint) {
+      return new Promise<void>((resolve, reject) => {
+        const socket = state.socket!;
+        const handleOpen = () => {
+          cleanup();
+          resolve();
+        };
+        const handleClose = () => {
+          cleanup();
+          reject(new Error(`Upstream host RPC websocket closed before ready: ${endpoint}`));
+        };
+        const cleanup = () => {
+          socket.removeEventListener('open', handleOpen);
+          socket.removeEventListener('close', handleClose);
+        };
+        socket.addEventListener('open', handleOpen, { once: true });
+        socket.addEventListener('close', handleClose, { once: true });
+      });
+    }
+
+    const socket = new WebSocket(endpoint);
+    state.socket = socket;
+    state.socketEndpoint = endpoint;
+    attachUpstreamSocketHandlers(state, socket, endpoint);
+
+    await new Promise<void>((resolve, reject) => {
+      const handleOpen = () => {
+        cleanup();
+        resolve();
+      };
+      const handleClose = () => {
+        cleanup();
+        reject(new Error(`Upstream host RPC websocket closed before ready: ${endpoint}`));
+      };
+      const handleError = () => {
+        cleanup();
+        reject(new Error(`Upstream host RPC websocket failed before ready: ${endpoint}`));
+      };
+      const cleanup = () => {
+        socket.removeEventListener('open', handleOpen);
+        socket.removeEventListener('close', handleClose);
+        socket.removeEventListener('error', handleError);
+      };
+      socket.addEventListener('open', handleOpen, { once: true });
+      socket.addEventListener('close', handleClose, { once: true });
+      socket.addEventListener('error', handleError, { once: true });
+    });
+  })();
+
+  try {
+    await state.connectPromise;
+  } finally {
+    state.connectPromise = null;
+  }
 }
+
+export function disconnectUpstreamHostRpc(upstreamId = 'default'): void {
+  const state = getUpstreamConnectionState(upstreamId);
+  const socket = state.socket;
+  clearUpstreamSocketState(state);
+  if (!socket) {
+    return;
+  }
+  try {
+    socket.close();
+  } catch {
+    // Ignore close errors.
+  }
+}
+
+export function isUpstreamHostRpcConnected(upstreamId = 'default'): boolean {
+  const state = getUpstreamConnectionState(upstreamId);
+  return !!state.socket && state.socket.readyState === WebSocket.OPEN;
+}
+
+async function invokeUpstreamHostRpcPath(upstreamId: string, path: readonly string[], args: readonly unknown[] = []): Promise<unknown> {
+  if (!path.length) {
+    throw new Error('Upstream host RPC path cannot be empty.');
+  }
+
+  const methodName = path.join('.');
+  await connectUpstreamHostRpc(upstreamId);
+
+  const state = getUpstreamConnectionState(upstreamId);
+  const socket = state.socket;
+  const endpoint = state.socketEndpoint;
+  if (!socket || socket.readyState !== WebSocket.OPEN || !endpoint) {
+    throw new Error('Upstream host RPC websocket is not connected.');
+  }
+
+  return new Promise<unknown>((resolve, reject) => {
+    const requestId = nextUpstreamRequestId(state);
+    state.pendingRequests.set(requestId, { resolve, reject });
+
+    try {
+      socket.send(Uint8Array.from(encodeRpcAwaitMessage(nojsxWSEvent.RPC_CALL_AWAIT, requestId, methodName, [...args])));
+    } catch (error) {
+      state.pendingRequests.delete(requestId);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
+export async function invokeUpstreamHostRpc(methodName: string, args: unknown): Promise<unknown> {
+  const path = methodName.split('.').filter(Boolean);
+  if (path.length === 0) {
+    throw new Error('Upstream host RPC path cannot be empty.');
+  }
+
+  const upstreamId = path[0];
+  const normalizedPath = path.slice(1);
+  if (normalizedPath.length === 0) {
+    throw new Error(`Upstream host RPC path cannot target only the ${upstreamId} root namespace.`);
+  }
+
+  return invokeUpstreamHostRpcPath(upstreamId, normalizedPath, normalizeHostArgs(args));
+}
+
+//TODO: check reconnect 

@@ -45,7 +45,7 @@ Here.
 - Impact: shell rendered with empty content, wasted debugging time
 
 7. Introduced browser-invalid imports
-- Trigger: importing `join` from `nojsx/core/util/util`
+- Trigger: importing `join` from `nojsx`
 - Wrong: used internal library path not valid in browser import map
 - Violated: browser runtime contract
 - Should have done: keep helper local or use only mapped browser-safe imports
