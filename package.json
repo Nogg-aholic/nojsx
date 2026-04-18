@@ -1,7 +1,7 @@
 {
 	"name": "@nogg-aholic/nojsx",
 	"description": "Browser-first JSX runtime with a small app server, route hosting, and server-backed component calls.",
-	"version": "1.0.108",
+	"version": "1.1.0",
 	"homepage": "https://github.com/Nogg-aholic/noJSX#readme",
 	"license": "MIT",
 	"type": "module",
