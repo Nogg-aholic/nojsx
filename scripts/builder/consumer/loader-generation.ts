@@ -140,7 +140,7 @@ export async function buildGeneratedLoadersModule(options: {
 	const pagesLines = pages.map((page) => `  ${JSON.stringify(page.exportName)}: ${JSON.stringify(page.routePath)},`);
 
 	const nojsxLoaderImportPath = options.jsxImportSource === "nojsx/index" || options.jsxImportSource === "nojsx/index.js"
-		? "nojsx"
+		? "@nogg-aholic/nojsx"
 		: options.jsxImportSource;
 
 	const code = [
