@@ -62,6 +62,17 @@ jobs:
             echo "For trusted publishing, ensure the package exists and the trusted publisher is attached to this exact package."
           fi
 
+      - name: Print trusted publishing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_NAME=$(node -p 'require("./package.json").name')
+          echo "package=$PACKAGE_NAME"
+          echo "repository=${GITHUB_REPOSITORY}"
+          echo "workflow_file=publish.yml"
+          echo "ref=${GITHUB_REF}"
+          echo "For npm trusted publishing, npm must be configured for this exact repository and workflow filename."
+
       - name: Publish to npm
         run: npm publish --provenance --access public
 
