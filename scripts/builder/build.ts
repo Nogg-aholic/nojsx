@@ -1,7 +1,7 @@
 import path from "node:path";
 import { buildGeneratedLoadersModule } from "./consumer/loader-generation.js";
 import { readShellPageLayoutFields } from "./_nojsx/shell-page.js";
-import { renderDevHtmlDocument } from "nojsx/core/shell-page";
+import { renderDevHtmlDocument } from "@nogg-aholic/nojsx/core/shell-page";
 import type { BuildNojsxAppOptions, BuildNojsxAppResolvedPaths } from "./types.js";
 import { existsSync } from "node:fs";
 import { buildAppCss, transpileAppSource, transpileSourceTree } from "./consumer/transpile.js";

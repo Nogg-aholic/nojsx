@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 function resolveTailwindBuilderRoot(fromDir: string): string {
     const packageJsonProbe = path.join(fromDir, "package.json");
     const requireFromDir = createRequire(existsSync(packageJsonProbe) ? packageJsonProbe : import.meta.url);
-	const builderPackageJsonPath = requireFromDir.resolve("nojsx/package.json");
+    const builderPackageJsonPath = requireFromDir.resolve("@nogg-aholic/nojsx/package.json");
     return path.dirname(builderPackageJsonPath);
 }
 

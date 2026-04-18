@@ -10,6 +10,8 @@ type PackageJson = {
   version: string;
 };
 
+const PACKAGE_NAME = '@nogg-aholic/nojsx';
+
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const DIST_ROOT = join(PROJECT_ROOT, 'dist');
 const SRC_ROOT = join(PROJECT_ROOT, 'src');
@@ -141,8 +143,8 @@ function rewriteNojsxSelfImports(fromFile: string, contents: string): string {
   };
 
   const patterns = [
-    /(from\s*)(["'])nojsx\/([^"']+)\2/g,
-    /(import\(\s*)(["'])nojsx\/([^"']+)\2/g,
+    /(from\s*)(["'])@nogg-aholic\/nojsx\/([^"']+)\2/g,
+    /(import\(\s*)(["'])@nogg-aholic\/nojsx\/([^"']+)\2/g,
   ] as const;
 
   let next = contents;
@@ -188,16 +190,21 @@ async function assertDistRelativeImportExtensions(): Promise<void> {
 
 async function packTgz(): Promise<void> {
   const pkg = JSON.parse(await Bun.file(join(PROJECT_ROOT, 'package.json')).text()) as PackageJson;
-  const versionedTgzName = `${pkg.name}-${pkg.version}.tgz`;
+  const packedBaseName = pkg.name.replace(/^@/, '').replace(/\//g, '-');
+  const versionedTgzName = `${packedBaseName}-${pkg.version}.tgz`;
   const versionedTgzPath = join(PROJECT_ROOT, versionedTgzName);
-  const stableTgzName = `${pkg.name}.tgz`;
+  const stableTgzName = `${PACKAGE_NAME.replace(/^@/, '').replace(/\//g, '-')}.tgz`;
   const stableTgzPath = join(PROJECT_ROOT, stableTgzName);
+  const legacyStableTgzPath = join(PROJECT_ROOT, 'nojsx.tgz');
 
   if (existsSync(versionedTgzPath)) {
     await rm(versionedTgzPath, { force: true });
   }
   if (existsSync(stableTgzPath)) {
     await rm(stableTgzPath, { force: true });
+  }
+  if (existsSync(legacyStableTgzPath)) {
+    await rm(legacyStableTgzPath, { force: true });
   }
 
   await run(NPM_COMMAND, ['pack', '--pack-destination', '.']);

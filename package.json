@@ -1,5 +1,5 @@
 {
-	"name": "nojsx",
+	"name": "@nogg-aholic/nojsx",
 	"description": "Browser-first JSX runtime with a small app server, route hosting, and server-backed component calls.",
 	"version": "1.0.108",
 	"homepage": "https://github.com/Nogg-aholic/noJSX#readme",
@@ -70,8 +70,7 @@
 	},
 	"publishConfig": {
 		"access": "public",
-		"registry": "https://registry.npmjs.org/",
-		"provenance": true
+		"registry": "https://registry.npmjs.org/"
 	},
 	"keywords": [
 		"jsx",

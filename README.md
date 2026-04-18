@@ -80,7 +80,7 @@ This compiles the runtime into `dist/`.
 bun run compile
 ```
 
-This compiles the runtime and packs `nojsx.tgz` at the repo root for consumer testing.
+This compiles the runtime and packs `nogg-aholic-nojsx.tgz` at the repo root for consumer testing.
 
 ---
 
@@ -137,9 +137,9 @@ The remaining placeholder files under `src/core/*generated*` are transitional cl
 The repository includes `examples/nojsx-minimal` as the package validation target.
 
 It demonstrates:
-- TSX compilation with `jsxImportSource: nojsx`,
+- TSX compilation with `jsxImportSource: @nogg-aholic/nojsx`,
 - CSS build via `nojsx-build-css`,
-- consuming a packed local tarball (`file:../../nojsx/nojsx.tgz`),
+- consuming a packed local tarball (`file:../../nojsx/nogg-aholic-nojsx.tgz`),
 - server-backed component calls through `callOnServerAsync(...)`,
 - upstream host RPC bridged through the app server,
 - same-origin docs passthrough for `/vscode/__docs/*`.

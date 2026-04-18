@@ -61,7 +61,7 @@ function resolveNrpcDistRoot(fromModuleUrl: string): string {
 function resolveNojsxDistRoot(fromModuleUrl: string): string {
 	const fromFilePath = fileURLToPath(fromModuleUrl);
 	const requireFromServerModule = createRequire(fromFilePath);
-	const nojsxPackageJsonPath = requireFromServerModule.resolve('nojsx/package.json');
+	const nojsxPackageJsonPath = requireFromServerModule.resolve('@nogg-aholic/nojsx/package.json');
 	return path.join(path.dirname(nojsxPackageJsonPath), 'dist');
 }
 

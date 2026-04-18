@@ -199,10 +199,10 @@ export function renderDevHtmlDocument(params: {
   return Promise.resolve(renderShellPageParentDocument({
     title: shellLayout.title,
     importMap: {
-      "nojsx": `${origin}/_pkg/nojsx/index.js`,
-      "nojsx/index.js": `${origin}/_pkg/nojsx/index.js`,
-      "nojsx/jsx-runtime": `${origin}/_pkg/nojsx/jsx-runtime.js`,
-      "nojsx/jsx-dev-runtime": `${origin}/_pkg/nojsx/jsx-dev-runtime.js`,
+      "@nogg-aholic/nojsx": `${origin}/_pkg/nojsx/index.js`,
+      "@nogg-aholic/nojsx/index.js": `${origin}/_pkg/nojsx/index.js`,
+      "@nogg-aholic/nojsx/jsx-runtime": `${origin}/_pkg/nojsx/jsx-runtime.js`,
+      "@nogg-aholic/nojsx/jsx-dev-runtime": `${origin}/_pkg/nojsx/jsx-dev-runtime.js`,
       "@nogg-aholic/nrpc": `${origin}/_pkg/nrpc/index.js`,
     },
     cspNonce: shellLayout.cspNonce,

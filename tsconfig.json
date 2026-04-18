@@ -4,12 +4,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "types": ["node", "bun"],
-    "jsxImportSource": "nojsx",
+    "jsxImportSource": "@nogg-aholic/nojsx",
     "paths": {
-      "nojsx/jsx-runtime": ["./src/jsx-runtime.ts"],
-      "nojsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"],
-      "nojsx": ["./src/index.ts"],
-      "nojsx/*": ["./src/*"]
+      "@nogg-aholic/nojsx/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "@nogg-aholic/nojsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"],
+      "@nogg-aholic/nojsx": ["./src/index.ts"],
+      "@nogg-aholic/nojsx/*": ["./src/*"]
     },
     "sourceMap": true,
     "declaration": true,

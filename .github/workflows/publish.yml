@@ -77,4 +77,4 @@ jobs:
           append_body: false
           generate_release_notes: true
           files: |
-            nojsx-${{ steps.pkg.outputs.version }}.tgz
+            nogg-aholic-nojsx-${{ steps.pkg.outputs.version }}.tgz

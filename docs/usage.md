@@ -25,7 +25,7 @@ The minimal example shows this split in [examples/nojsx-minimal/src/app.tsx](../
 
 ### TypeScript config
 
-Use `react-jsx` mode and point the JSX runtime at `nojsx`:
+Use `react-jsx` mode and point the JSX runtime at `@nogg-aholic/nojsx`:
 
 ```json
 {
@@ -34,7 +34,7 @@ Use `react-jsx` mode and point the JSX runtime at `nojsx`:
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-    "jsxImportSource": "nojsx",
+    "jsxImportSource": "@nogg-aholic/nojsx",
     "rootDir": ".",
     "baseUrl": ".",
     "outDir": "./dist",
@@ -48,12 +48,12 @@ Reference: [examples/nojsx-minimal/tsconfig.json](../examples/nojsx-minimal/tsco
 
 ### Package dependency
 
-Consumer apps install `nojsx` like a normal dependency. In this repo's examples, noJSX is consumed from a local tarball:
+Consumer apps install `@nogg-aholic/nojsx` like a normal dependency. In this repo's examples, noJSX is consumed from a local tarball:
 
 ```json
 {
   "dependencies": {
-    "nojsx": "file:../../nojsx.tgz"
+    "@nogg-aholic/nojsx": "file:../../nojsx/nogg-aholic-nojsx.tgz"
   }
 }
 ```
@@ -65,7 +65,7 @@ Reference: [examples/nojsx-minimal/package.json](../examples/nojsx-minimal/packa
 Files using JSX should declare the runtime source:
 
 ```ts
-/** @jsxImportSource nojsx */
+/** @jsxImportSource @nogg-aholic/nojsx */
 ```
 
 ## 3. Authoring a component
@@ -73,8 +73,8 @@ Files using JSX should declare the runtime source:
 noJSX components are classes. Reusable UI typically extends `NComponent`.
 
 ```tsx
-/** @jsxImportSource nojsx */
-import { NComponent } from "nojsx";
+/** @jsxImportSource @nogg-aholic/nojsx */
+import { NComponent } from "@nogg-aholic/nojsx";
 
 export class CounterCard extends NComponent {
   count = 0;

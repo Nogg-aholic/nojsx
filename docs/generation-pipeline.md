@@ -11,7 +11,7 @@ The package now builds:
 - the runtime JavaScript in `dist/`,
 - the runtime type declarations in `dist/`,
 - the Tailwind helper CLI exposed as `nojsx-build-css`,
-- the app build/server helper exports under `nojsx/builder` and `nojsx/start-nojsx-server`.
+- the app build/server helper exports under `@nogg-aholic/nojsx/builder` and `@nogg-aholic/nojsx/start-nojsx-server`.
 
 It does not build:
 
@@ -26,7 +26,7 @@ The `scripts/` directory now contains only the scripts still required by the pac
 - `clean-dist.ts`: clears `dist/` before each build.
 - `build-tailwind.ts`: thin wrapper around the Tailwind CLI.
 - `assert-dist-relative-import-extensions.ts`: asserts emitted `dist` JS has explicit extensions on relative imports.
-- `pack-tgz.ts`: runs package packing flow and writes a stable `nojsx.tgz` at repo root.
+- `pack-tgz.ts`: runs package packing flow and writes a stable `nogg-aholic-nojsx.tgz` at repo root.
 
 The TSX live preview runtime now lives under `src/live-preview/` as TypeScript and is compiled with the rest of the runtime into `dist/live-preview/`.
 
@@ -41,16 +41,16 @@ The TSX live preview runtime now lives under `src/live-preview/` as TypeScript a
 
 This is the package build. There is no `regen` phase anymore.
 
-`bun run compile` builds and packs `nojsx.tgz`.
+`bun run compile` builds and packs `nogg-aholic-nojsx.tgz`.
 
 ## 3.1 Local package validation flow
 
 The repository validates packaging via the minimal example.
 
-- `bun run compile`: runs build and writes `nojsx.tgz`.
-- `examples/nojsx-minimal`: installs from `file:../../nojsx/nojsx.tgz` and validates the consumer build.
+- `bun run compile`: runs build and writes `nogg-aholic-nojsx.tgz`.
+- `examples/nojsx-minimal`: installs from `file:../../nojsx/nogg-aholic-nojsx.tgz` and validates the consumer build.
 
-`examples/nojsx-minimal` should consume `nojsx` via `file:../../nojsx/nojsx.tgz`.
+`examples/nojsx-minimal` should consume `@nogg-aholic/nojsx` via `file:../../nojsx/nogg-aholic-nojsx.tgz`.
 
 ## 4. What `build-tailwind.ts` does
 
@@ -73,7 +73,7 @@ Consumers still build app-owned concerns through the builder exports:
 - `startNojsxServer(...)` serves the built app, websocket transport, and optional custom request handlers,
 - `buildGeneratedLoadersModule(...)` emits route/component loader metadata for the app.
 
-These helpers are exported through `nojsx/builder` and `nojsx/start-nojsx-server`.
+These helpers are exported through `@nogg-aholic/nojsx/builder` and `@nogg-aholic/nojsx/start-nojsx-server`.
 
 ## 6. What consumers still own
 
