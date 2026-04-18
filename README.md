@@ -1,6 +1,6 @@
-# nojsx
+# noJSX
 
-`nojsx` is a TypeScript-first JSX runtime for client-rendered UI. It is **not React**.
+`noJSX` is a TypeScript-first JSX runtime for client-rendered UI. It is **not React**.
 
 The anchor concept for this package is:
 
@@ -12,7 +12,7 @@ This document is concept-first. For practical app-author guidance, see [`docs/us
 
 ## 1) Philosophy and intended use-cases
 
-`nojsx` exists to remove repetitive glue work in apps with lots of UI interactions:
+`noJSX` exists to remove repetitive glue work in apps with lots of UI interactions:
 - no endpoint sprawl for each tiny interaction,
 - no manual request/response shape maintenance for every action,
 - no custom state sync boilerplate for each component flow.
@@ -34,13 +34,23 @@ That component library is being reworked. The current repository direction is th
 
 ---
 
-## 3) Client-only runtime model
+## 3) Runtime model
 
-`nojsx` now runs as a browser-only runtime. There is no built-in server transport or socket protocol in the active runtime path.
+`noJSX` is a browser-first JSX runtime with a small companion app server.
 
-Direction rules in client-only mode:
+Current package surface:
 
-- Runtime behavior is fully browser-local.
+- browser-rendered `NComponent` UI,
+- route hosting through `NavOutlet`,
+- a dev/build app server entrypoint exposed as `nojsx/start-nojsx-server`,
+- server-side RPC forwarding helpers exposed as `nojsx/server/upstream-host-proxy`.
+
+Important boundary:
+
+- `noJSX` is not SSR or a framework with server/client component splitting,
+- but it does support a server runtime for websocket-backed component calls and app-owned request handling,
+- browser code can call server-owned methods with `callOnServerAsync(...)`,
+- consuming apps can proxy upstream services through the app server so the browser stays same-origin.
 
 ---
 
@@ -56,7 +66,7 @@ After DOM updates, the runtime re-initializes UI bindings.
 
 ---
 
-## 5) Build workflow (`build`)
+## 5) Build workflow
 
 ### Release / publish loop
 
@@ -64,27 +74,13 @@ After DOM updates, the runtime re-initializes UI bindings.
 bun run build
 ```
 
-This runs:
-1. TypeScript compile,
-2. script compile,
-3. dist import-extension assertion,
-4. dist mirror step.
-
-`bun run compile` remains as a compatibility alias.
-
-To produce a local package tarball:
+This compiles the runtime into `dist/`.
 
 ```bash
-bun run pack:tgz
+bun run compile
 ```
 
-This writes `nojsx.tgz` at the repo root.
-
-To validate packaging against the minimal example:
-
-```bash
-bun run test:tgz:minimal
-```
+This compiles the runtime and packs `nojsx.tgz` at the repo root for consumer testing.
 
 ---
 
@@ -109,19 +105,21 @@ The remaining placeholder files under `src/core/*generated*` are transitional cl
 
 ---
 
-## 8) Do / Don’t for client-only component authoring
+## 8) Do / Don’t for component authoring
 
 ### Do
 
 - Do model features as `NComponent` classes.
 - Do keep component logic local and explicit.
 - Do use `onLoad`/`onUnload` for lifecycle-driven setup and cleanup.
+- Do use `serverLoad` and `callOnServerAsync(...)` when a component needs server-owned state or server-side calls.
 - Do treat in-memory state as the source of truth for UI behavior.
+- Do keep upstream services behind the app server when the browser should not connect to them directly.
 
 ### Don’t
 
-- Don’t treat `nojsx` as React semantics.
-- Don’t expect built-in network transport behavior in component lifecycle methods.
+- Don’t treat `noJSX` as React semantics.
+- Don’t expose upstream hosts directly to the browser when the app server can proxy them.
 - Don’t use method shorthand inside classes; use class fields with `=`.
 - Don’t use deprecated `/*@client*/` or `/*@end-client*/` comments.
 
@@ -141,18 +139,23 @@ The repository includes `examples/nojsx-minimal` as the package validation targe
 It demonstrates:
 - TSX compilation with `jsxImportSource: nojsx`,
 - CSS build via `nojsx-build-css`,
-- consuming a packed local tarball (`file:../../nojsx.tgz`).
+- consuming a packed local tarball (`file:../../nojsx/nojsx.tgz`),
+- server-backed component calls through `callOnServerAsync(...)`,
+- upstream host RPC bridged through the app server,
+- same-origin docs passthrough for `/vscode/__docs/*`.
 
-From the repo root:
+From the `noJSX` package directory:
 
 ```bash
-bun run example:minimal
+bun run compile
 ```
 
-Or run the full packaging + example validation loop:
+Then from `examples/nojsx-minimal/`:
 
 ```bash
-bun run test:tgz:minimal
+bun install
+bunx tsc -p ./tsconfig.json --pretty false
+bun run build
 ```
 
 ## License

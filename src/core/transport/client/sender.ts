@@ -1,40 +1,15 @@
 import { nojsxWSEvent } from '../events.js';
 import { sendBinary } from './connection.js';
-import { encodeRpcAwaitMessage, encodeRpcCallMessage, encodeRpcReturnMessage } from '@nogg-aholic/nrpc';
+import { encodeRpcAwaitMessage, encodeRpcCallMessage, encodeRpcReturnMessage, serializeRpcMethodRefs } from '@nogg-aholic/nrpc';
 
 const encoder = new TextEncoder();
 
-type RpcNamedReference = {
-  __nojsxRpcName?: string;
-};
-
-function serializeRpcArgs(value: unknown): unknown {
-  const rpcName = (value as RpcNamedReference | undefined)?.__nojsxRpcName;
-  if (typeof rpcName === 'string' && rpcName.length > 0) {
-    return { __nojsxRpcName: rpcName };
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((entry) => serializeRpcArgs(entry));
-  }
-
-  if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      out[key] = serializeRpcArgs(entry);
-    }
-    return out;
-  }
-
-  return value;
-}
-
 export function sendRpcToServer(methodName: string, componentId: string, args: unknown): void {
-  sendBinary(encodeRpcCallMessage(nojsxWSEvent.RPC_CALL, methodName, serializeRpcArgs(args ?? null), componentId));
+  sendBinary(encodeRpcCallMessage(nojsxWSEvent.RPC_CALL, methodName, serializeRpcMethodRefs(args ?? null), componentId));
 }
 
 export function sendRpcToServerAwait(methodName: string, componentId: string, args: unknown, requestId: number): void {
-  sendBinary(encodeRpcAwaitMessage(nojsxWSEvent.RPC_CALL_AWAIT, requestId, methodName, serializeRpcArgs(args ?? null), componentId));
+  sendBinary(encodeRpcAwaitMessage(nojsxWSEvent.RPC_CALL_AWAIT, requestId, methodName, serializeRpcMethodRefs(args ?? null), componentId));
 }
 
 export function sendRpcReturnToServer(requestId: number, ok: boolean, payload: unknown): void {

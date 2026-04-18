@@ -31,6 +31,11 @@ function splitPath(fullPath: string): { pathname: string; query: string } {
 	return { pathname: fullPath.slice(0, qIndex) || '/', query: fullPath.slice(qIndex + 1) };
 }
 
+function buildCanonicalRoutePath(template: string, query: string): string {
+	const normalizedTemplate = normalizePathname(template || '/');
+	return query ? `${normalizedTemplate}?${query}` : normalizedTemplate;
+}
+
 function fnv1a32(s: string): number {
 	let h = 0x811c9dc5;
 	for (let i = 0; i < s.length; i++) {
@@ -163,13 +168,13 @@ function getCurrentPageState(): CurrentPageState | null {
 	if (!componentName) return null;
 
 	return {
-		fullPath,
+		fullPath: buildCanonicalRoutePath(picked.template, query),
 		pathname,
 		query,
 		template: picked.template,
 		params: picked.params,
 		componentName,
-		routeKey: navInstanceKey(fullPath),
+		routeKey: navInstanceKey(buildCanonicalRoutePath(picked.template, query)),
 	};
 }
 
@@ -192,7 +197,14 @@ export class NavOutlet extends NComponent {
 			return null;
 		}
 
-		const instance = Page({ __key: routeKey }) as NComponent;
+		const previousRenderParent = componentRegistry.getRenderParent();
+		let instance: NComponent;
+		try {
+			componentRegistry.setRenderParent(this.id);
+			instance = Page({ __key: routeKey }) as NComponent;
+		} finally {
+			componentRegistry.setRenderParent(previousRenderParent ?? '');
+		}
 		this.pageCache.set(routeKey, { componentName, instance });
 		componentRegistry.consumePreservedChildId(instance.id);
 		return instance;
@@ -200,7 +212,7 @@ export class NavOutlet extends NComponent {
 
 	private renderCachedPage(routeKey: string, currentRouteKey: string, cached: CachedPageState): string {
 		const isActive = routeKey === currentRouteKey;
-		const wrapperClass = isActive ? '' : 'hidden';
+		const wrapperStyle = isActive ? '' : ' style="display:none"';
 		const mounted = typeof document !== 'undefined'
 			&& !!document.querySelector(`[data-component-id="${cached.instance.id}"]`);
 
@@ -208,7 +220,7 @@ export class NavOutlet extends NComponent {
 			? `<div data-component-id="${escapeAttribute(cached.instance.id)}"></div>`
 			: cached.instance.__html();
 
-		return `<div class="${wrapperClass}" data-nojsx-route="${escapeAttribute(routeKey)}">${pageMarkup}</div>`;
+		return `<div data-nojsx-route="${escapeAttribute(routeKey)}"${wrapperStyle}>${pageMarkup}</div>`;
 	}
 
 	private renderClientRouteWrappers(currentRouteKey: string): boolean {

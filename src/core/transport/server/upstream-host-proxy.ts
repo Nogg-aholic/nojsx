@@ -1,25 +1,43 @@
-import { decodeRpcReturnMessage, encodeRpcAwaitMessage} from '@nogg-aholic/nrpc';
-import { nojsxWSEvent } from '../events.js';
+import {
+  decodeRpcReturnMessage,
+  decodeRpcReturnMessageWithCodec,
+  encodeRpcAwaitMessage,
+  encodeRpcAwaitMessageWithCodec,
+  type RpcMethodCodec,
+} from '@nogg-aholic/nrpc';
+
+export type UpstreamHostRpcWsProfile = {
+  callAwaitEvent: number;
+  returnEvent: number;
+};
+
+const DEFAULT_UPSTREAM_HOST_RPC_WS_PROFILE: UpstreamHostRpcWsProfile = {
+  callAwaitEvent: 0x0b,
+  returnEvent: 0x2a,
+};
 
 type PendingUpstreamRequest = {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
+  codec?: RpcMethodCodec<any[], any>;
 };
 
 type UpstreamGlobals = typeof globalThis & {
-  __nojsxUpstreamHostRpcEndpoint?: string;
-  __nojsxResolvedUpstreamHostRpcEndpoint?: string;
-  __nojsxUpstreamHostRpcWsEndpoint?: string;
-  __nojsxResolvedUpstreamHostRpcWsEndpoint?: string;
-  __nojsxUpstreamHostRpcEndpoints?: Record<string, string>;
-  __nojsxResolvedUpstreamHostRpcEndpoints?: Record<string, string>;
-  __nojsxUpstreamHostRpcWsEndpoints?: Record<string, string>;
-  __nojsxResolvedUpstreamHostRpcWsEndpoints?: Record<string, string>;
+  __nojsxInvokeUpstreamHostRpc?: (methodName: string, args: unknown) => Promise<unknown>;
 };
+
+type CodecResolver = (methodName: string) => RpcMethodCodec<any[], any> | undefined;
 
 export type UpstreamHostRpcConfig = {
   rpcEndpoint?: string;
   wsEndpoint?: string;
+  codecRegistry?:
+    | Map<string, RpcMethodCodec<any[], any>>
+    | ReadonlyMap<string, RpcMethodCodec<any[], any>>
+    | Iterable<readonly [string, RpcMethodCodec<any[], any>]>
+    | CodecResolver
+    | Record<string, RpcMethodCodec<any[], any>>;
+  wsProfile?: UpstreamHostRpcWsProfile;
 };
 
 type UpstreamConnectionState = {
@@ -28,9 +46,34 @@ type UpstreamConnectionState = {
   connectPromise: Promise<void> | null;
   nextRequestId: number;
   pendingRequests: Map<number, PendingUpstreamRequest>;
+  rpcEndpoint: string | null;
+  wsEndpoint: string | null;
+  codecResolver?: CodecResolver;
+  wsProfile: UpstreamHostRpcWsProfile;
 };
 
 const upstreamConnections = new Map<string, UpstreamConnectionState>();
+
+function createCodecResolver(
+  codecRegistry: UpstreamHostRpcConfig['codecRegistry'],
+): CodecResolver | undefined {
+  if (!codecRegistry) {
+    return undefined;
+  }
+
+  if (typeof codecRegistry === 'function') {
+    return codecRegistry;
+  }
+
+  if (typeof (codecRegistry as Iterable<readonly [string, RpcMethodCodec<any[], any>]>)[Symbol.iterator] === 'function') {
+    const entries = Array.from(codecRegistry as Iterable<readonly [string, RpcMethodCodec<any[], any>]>);
+    const registry = new Map<string, RpcMethodCodec<any[], any>>(entries);
+    return (methodName: string) => registry.get(methodName);
+  }
+
+  const registry = new Map<string, RpcMethodCodec<any[], any>>(Object.entries(codecRegistry as Record<string, RpcMethodCodec<any[], any>>));
+  return (methodName: string) => registry.get(methodName);
+}
 
 
 
@@ -51,64 +94,35 @@ function getUpstreamConnectionState(upstreamId: string): UpstreamConnectionState
     connectPromise: null,
     nextRequestId: 1,
     pendingRequests: new Map<number, PendingUpstreamRequest>(),
+    rpcEndpoint: null,
+    wsEndpoint: null,
+    codecResolver: undefined,
+    wsProfile: { ...DEFAULT_UPSTREAM_HOST_RPC_WS_PROFILE },
   };
   upstreamConnections.set(upstreamId, state);
   return state;
 }
 
 function getUpstreamHostRpcEndpoint(upstreamId: string): string {
-  const globals = globalThis as UpstreamGlobals;
-  const resolvedEndpoint = globals.__nojsxResolvedUpstreamHostRpcEndpoints?.[upstreamId]
-    ?? (upstreamId === 'default' ? globals.__nojsxResolvedUpstreamHostRpcEndpoint : undefined);
-  if (typeof resolvedEndpoint === 'string' && resolvedEndpoint.length > 0) {
-    return resolvedEndpoint;
-  }
-  const globalEndpoint = globals.__nojsxUpstreamHostRpcEndpoints?.[upstreamId]
-    ?? (upstreamId === 'default' ? globals.__nojsxUpstreamHostRpcEndpoint : undefined);
-  if (typeof globalEndpoint === 'string' && globalEndpoint.length > 0) {
-    return globalEndpoint;
+  const state = getUpstreamConnectionState(upstreamId);
+  if (typeof state.rpcEndpoint === 'string' && state.rpcEndpoint.length > 0) {
+    return state.rpcEndpoint;
   }
 
-  throw new Error('Upstream host RPC endpoint is not configured. Set it from server startup before connecting.');
+  throw new Error(`Upstream host RPC endpoint is not configured for ${upstreamId}. Set it from server startup before connecting.`);
 }
 
 async function resolveUpstreamHostRpcEndpoint(upstreamId: string): Promise<string> {
-  const globals = globalThis as UpstreamGlobals;
-  const knownEndpoint = getUpstreamHostRpcEndpoint(upstreamId);
-  globals.__nojsxResolvedUpstreamHostRpcEndpoints = globals.__nojsxResolvedUpstreamHostRpcEndpoints ?? {};
-  globals.__nojsxResolvedUpstreamHostRpcEndpoints[upstreamId] = knownEndpoint;
-  if (upstreamId === 'default') {
-    globals.__nojsxResolvedUpstreamHostRpcEndpoint = knownEndpoint;
-  }
-  return knownEndpoint;
+  return getUpstreamHostRpcEndpoint(upstreamId);
 }
 
 async function resolveUpstreamHostRpcWsEndpoint(upstreamId: string): Promise<string> {
-  const globals = globalThis as UpstreamGlobals;
-  const resolved = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints?.[upstreamId]
-    ?? (upstreamId === 'default' ? globals.__nojsxResolvedUpstreamHostRpcWsEndpoint : undefined);
-  if (typeof resolved === 'string' && resolved.length > 0) {
-    return resolved;
+  const state = getUpstreamConnectionState(upstreamId);
+  if (typeof state.wsEndpoint === 'string' && state.wsEndpoint.length > 0) {
+    return state.wsEndpoint;
   }
 
-  const explicit = globals.__nojsxUpstreamHostRpcWsEndpoints?.[upstreamId]
-    ?? (upstreamId === 'default' ? globals.__nojsxUpstreamHostRpcWsEndpoint : undefined);
-  if (typeof explicit === 'string' && explicit.length > 0) {
-    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints ?? {};
-    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = explicit;
-    if (upstreamId === 'default') {
-      globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = explicit;
-    }
-    return explicit;
-  }
-
-  const nextResolved = deriveWsEndpoint(await resolveUpstreamHostRpcEndpoint(upstreamId));
-  globals.__nojsxResolvedUpstreamHostRpcWsEndpoints = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints ?? {};
-  globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = nextResolved;
-  if (upstreamId === 'default') {
-    globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = nextResolved;
-  }
-  return nextResolved;
+  return deriveWsEndpoint(await resolveUpstreamHostRpcEndpoint(upstreamId));
 }
 
 function deriveWsEndpoint(httpEndpoint: string): string {
@@ -121,35 +135,14 @@ function deriveWsEndpoint(httpEndpoint: string): string {
 }
 
 export function configureUpstreamHostRpc(upstreamId: string, config: UpstreamHostRpcConfig): void {
-  const globals = globalThis as UpstreamGlobals;
-  globals.__nojsxUpstreamHostRpcEndpoints = globals.__nojsxUpstreamHostRpcEndpoints ?? {};
-  globals.__nojsxResolvedUpstreamHostRpcEndpoints = globals.__nojsxResolvedUpstreamHostRpcEndpoints ?? {};
-  globals.__nojsxUpstreamHostRpcWsEndpoints = globals.__nojsxUpstreamHostRpcWsEndpoints ?? {};
-  globals.__nojsxResolvedUpstreamHostRpcWsEndpoints = globals.__nojsxResolvedUpstreamHostRpcWsEndpoints ?? {};
-  if (typeof config.rpcEndpoint === 'string' && config.rpcEndpoint.length > 0) {
-    globals.__nojsxUpstreamHostRpcEndpoints[upstreamId] = config.rpcEndpoint;
-    globals.__nojsxResolvedUpstreamHostRpcEndpoints[upstreamId] = config.rpcEndpoint;
-    if (upstreamId === 'default') {
-      globals.__nojsxUpstreamHostRpcEndpoint = config.rpcEndpoint;
-      globals.__nojsxResolvedUpstreamHostRpcEndpoint = config.rpcEndpoint;
-    }
-  }
-  if (typeof config.wsEndpoint === 'string' && config.wsEndpoint.length > 0) {
-    globals.__nojsxUpstreamHostRpcWsEndpoints[upstreamId] = config.wsEndpoint;
-    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = config.wsEndpoint;
-    if (upstreamId === 'default') {
-      globals.__nojsxUpstreamHostRpcWsEndpoint = config.wsEndpoint;
-      globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = config.wsEndpoint;
-    }
-  } else if (typeof config.rpcEndpoint === 'string' && config.rpcEndpoint.length > 0) {
-    const wsEndpoint = deriveWsEndpoint(config.rpcEndpoint);
-    globals.__nojsxUpstreamHostRpcWsEndpoints[upstreamId] = wsEndpoint;
-    globals.__nojsxResolvedUpstreamHostRpcWsEndpoints[upstreamId] = wsEndpoint;
-    if (upstreamId === 'default') {
-      globals.__nojsxUpstreamHostRpcWsEndpoint = wsEndpoint;
-      globals.__nojsxResolvedUpstreamHostRpcWsEndpoint = wsEndpoint;
-    }
-  }
+  const state = getUpstreamConnectionState(upstreamId);
+  state.rpcEndpoint = typeof config.rpcEndpoint === 'string' && config.rpcEndpoint.length > 0 ? config.rpcEndpoint : null;
+  state.wsEndpoint = typeof config.wsEndpoint === 'string' && config.wsEndpoint.length > 0 ? config.wsEndpoint : null;
+  state.codecResolver = createCodecResolver(config.codecRegistry);
+  state.wsProfile = {
+    ...DEFAULT_UPSTREAM_HOST_RPC_WS_PROFILE,
+    ...(config.wsProfile ?? {}),
+  };
 }
 
 function rejectPendingUpstreamRequests(state: UpstreamConnectionState, error: Error): void {
@@ -177,11 +170,15 @@ function attachUpstreamSocketHandlers(state: UpstreamConnectionState, socket: We
   socket.onmessage = (event) => {
     try {
       const payload = new Uint8Array(event.data);
-      const response = decodeRpcReturnMessage(payload, nojsxWSEvent.RPC_RETURN_S2C);
-      const pending = state.pendingRequests.get(response.requestId);
+      const requestId = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(1, true);
+      const pending = state.pendingRequests.get(requestId);
       if (!pending) {
         return;
       }
+
+      const response = pending.codec
+        ? decodeRpcReturnMessageWithCodec(payload, pending.codec, state.wsProfile.returnEvent)
+        : decodeRpcReturnMessage(payload, state.wsProfile.returnEvent);
 
       state.pendingRequests.delete(response.requestId);
       if (!response.ok) {
@@ -316,10 +313,14 @@ async function invokeUpstreamHostRpcPath(upstreamId: string, path: readonly stri
 
   return new Promise<unknown>((resolve, reject) => {
     const requestId = nextUpstreamRequestId(state);
-    state.pendingRequests.set(requestId, { resolve, reject });
+    const codec = state.codecResolver?.(methodName);
+    state.pendingRequests.set(requestId, { resolve, reject, codec });
 
     try {
-      socket.send(Uint8Array.from(encodeRpcAwaitMessage(nojsxWSEvent.RPC_CALL_AWAIT, requestId, methodName, [...args])));
+      const payload = codec
+        ? encodeRpcAwaitMessageWithCodec(state.wsProfile.callAwaitEvent, requestId, methodName, [...args], codec)
+        : encodeRpcAwaitMessage(state.wsProfile.callAwaitEvent, requestId, methodName, [...args]);
+      socket.send(Uint8Array.from(payload));
     } catch (error) {
       state.pendingRequests.delete(requestId);
       reject(error instanceof Error ? error : new Error(String(error)));
@@ -341,5 +342,7 @@ export async function invokeUpstreamHostRpc(methodName: string, args: unknown): 
 
   return invokeUpstreamHostRpcPath(upstreamId, normalizedPath, normalizeHostArgs(args));
 }
+
+(globalThis as UpstreamGlobals).__nojsxInvokeUpstreamHostRpc = invokeUpstreamHostRpc;
 
 //TODO: check reconnect 

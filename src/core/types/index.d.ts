@@ -1,9 +1,3 @@
-type __nojsxPropsOf<T> = T extends (props: infer P, ...args: any[]) => any ? P : {};
-
-type __nojsxComponentOf<TTemplate> = (props: __nojsxPropsOf<TTemplate>) => any;
-
-type __nojsxNodeOf<TTemplate, Slots> = __nojsxComponentOf<TTemplate> & Slots;
-
 type __nojsxJsxFn = (tag: string | Function | symbol, props?: JSX.HtmlTag, key?: any) => string;
 type __nojsxJsxDevFn = (
   tag: string | Function | symbol,
@@ -13,20 +7,8 @@ type __nojsxJsxDevFn = (
   _source?: any,
   _self?: any
 ) => string;
-type __nojsxPreviewRenderDocumentFn = (html: string) => void;
-type __nojsxEditorFn = (entry: Function, props?: Record<string, unknown>) => string;
 type __nojsxNavHandlerFn = (resolvedPath: string) => boolean | void;
-type __nojsxPromiseLikeKeys = 'then' | 'catch' | 'finally';
-type __nojsxRpcify<T> =
-  T extends (...args: infer A) => infer R
-    ? ((...args: A) => Promise<Awaited<R>>) & { __nojsxRpcName?: string }
-    : T extends object
-      ? { [K in keyof T as K extends __nojsxPromiseLikeKeys ? never : K]: __nojsxRpcify<T[K]> }
-      : T;
 
-type __nojsxRpcSymbolRef = { __nojsxRpcName?: string };
-
-export type IntrinsicRenderer = (props?: any) => any;
 
 export type nojsxNavState = {
   path: string;
@@ -58,7 +40,6 @@ declare global {
   var g: GlobalThis;
   namespace JSX {
     type Element = string;
-
     interface IntrinsicAttributes {
       key?: string | number;
       children?: unknown;
@@ -107,7 +88,6 @@ declare global {
 
 export interface nojsxComponent {
   template: ((props: any) => any) | string;
-  slots?: Array<nojsxComponent>;
 }
 
 declare global {
@@ -132,74 +112,7 @@ declare global {
     jsxs?: __nojsxJsxFn;
     jsxDEV?: __nojsxJsxDevFn;
     _jsxDEV?: __nojsxJsxDevFn;
-    NComponent?: typeof import('../../index.js').NComponent;
     navHandler?: __nojsxNavHandlerFn;
   }
 }
 export const g = globalThis as unknown as GlobalThis;
-
-export {};
-
-type __nojsxInjectedRpcSymbolRef = { __nojsxRpcName?: string };
-type __nojsxInjectedHostOpenApiSchema = {
-  type?: string;
-  description?: string;
-  items?: __nojsxInjectedHostOpenApiSchema;
-  properties?: Record<string, __nojsxInjectedHostOpenApiSchema>;
-  required?: string[];
-  anyOf?: __nojsxInjectedHostOpenApiSchema[];
-  enum?: Array<string | number | boolean | null>;
-};
-export type __nojsxInjectedHostOpenApiDocument = {
-  openapi: '3.1.0';
-  info: {
-    title: string;
-    version: string;
-  };
-  paths: Record<
-    string,
-    {
-      post: {
-        operationId: string;
-        summary?: string;
-        description?: string;
-        requestBody: {
-          required: boolean;
-          content: {
-            'application/json': {
-              schema: __nojsxInjectedHostOpenApiSchema;
-            };
-          };
-        };
-        responses: {
-          '200': {
-            description: string;
-            content: {
-              'application/json': {
-                schema: __nojsxInjectedHostOpenApiSchema;
-              };
-            };
-          };
-        };
-      };
-    }
-  >;
-};
-type __nojsxInjectedVscodeRpcApi = __nojsxInjectedRpcify<Record<string, unknown>>;
-type __nojsxInjectedPromiseLikeKeys = 'then' | 'catch' | 'finally';
-type __nojsxInjectedRpcify<T> =
-  T extends (...args: infer A) => infer R
-    ? ((...args: A) => Promise<Awaited<R>>) & { __nojsxRpcName?: string }
-    : T extends object
-      ? { [K in keyof T as K extends __nojsxInjectedPromiseLikeKeys ? never : K]: __nojsxInjectedRpcify<T[K]> }
-      : T;
-
-declare global {
-  var vscode: __nojsxInjectedVscodeRpcApi;
-  var getDocs:
-    ((symbolOrReference: __nojsxInjectedRpcSymbolRef) => Promise<__nojsxInjectedHostOpenApiDocument>)
-    & { __nojsxRpcName?: string };
-  var getDocsHtml:
-    ((symbolOrReference: __nojsxInjectedRpcSymbolRef) => Promise<string>)
-    & { __nojsxRpcName?: string };
-}

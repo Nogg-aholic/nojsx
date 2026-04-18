@@ -122,21 +122,25 @@ function syncNavState(pathValue: string): void {
 
 function getNavPathFromLocation(): string {
 	if (typeof window === 'undefined') return '/';
-
-	const rawHash = window.location.hash || '';
-	if (rawHash.startsWith('#/')) {
-		return rawHash.slice(1);
-	}
+	const g = globalThis as nojsxClientBootstrapGlobals & {
+		__nojsxPageRoutes?: Record<string, { componentName: string }>;
+	};
+	const hasHomeRoute = !!g.__nojsxPageRoutes?.['/home'];
+	const hasDashboardRoute = !!g.__nojsxPageRoutes?.['/dashboard'];
 
 	const pathname = window.location.pathname || '/';
 	const search = window.location.search || '';
 
 	if (pathname === '/') {
-		return rawHash.startsWith('#/') ? rawHash.slice(1) : '/';
+		if (hasHomeRoute) return `/home${search}`;
+		if (hasDashboardRoute) return `/dashboard${search}`;
+		return '/';
 	}
 
 	if (pathname.endsWith('/index.html') || pathname.endsWith('\\index.html')) {
-		return rawHash.startsWith('#/') ? rawHash.slice(1) : '/';
+		if (hasHomeRoute) return `/home${search}`;
+		if (hasDashboardRoute) return `/dashboard${search}`;
+		return '/';
 	}
 
 	return `${pathname}${search}`;
@@ -178,9 +182,8 @@ function navigateInternal(path: string, renderRoute?: () => void): void {
 	}
 
 	syncNavState(next);
-	const nextHash = `#${next}`;
-	if (window.location.hash !== nextHash) {
-		window.history.pushState({}, '', nextHash);
+	if (`${window.location.pathname}${window.location.search}` !== next) {
+		window.history.pushState({}, '', next);
 	}
 
 	setCurrentRoute(next, renderRoute);
@@ -211,7 +214,6 @@ function wireNavigation(renderRoute?: () => void): void {
 	};
 
 	window.addEventListener('popstate', syncFromLocation);
-	window.addEventListener('hashchange', syncFromLocation);
 }
 
 export function bindClientDelegatedEvents(): void {

@@ -1,24 +1,25 @@
-# nojsx Component Model
+# noJSX Component Model
 
-This document defines how nojsx components should be understood, authored, and consumed.
+This document defines how noJSX components should be understood, authored, and consumed.
 
-nojsx is the client-only runtime and component model that emerged from the broader `nojsx` system. `nojsx` referred to the older server-plus-client variant. The internal codebase, generated artifacts, CLI names, and some types still retain `nojsx` identifiers, but those names should be read as legacy implementation detail rather than current architectural direction.
+noJSX is a browser-first component runtime with an app-side server. It is not a framework with SSR or server/client component splitting. The internal codebase, generated artifacts, CLI names, and some types still retain `nojsx` identifiers, but those names should be read as implementation detail rather than architectural promise.
 
 The most important constraint is simple:
 
-> nojsx is a browser-only UI runtime. It does not provide server rendering, server actions, transport orchestration, RPC semantics, or request lifecycle abstractions.
+> noJSX is not SSR or hydration, but it does include a server runtime for websocket-backed component calls, `serverLoad`, and app-owned request handling.
 
-If you approach nojsx as React, Next.js, Remix, LiveView, or an isomorphic framework, you will make wrong architectural decisions.
+If you approach noJSX as React, Next.js, Remix, LiveView, or an isomorphic framework, you will make wrong architectural decisions.
 
 ## 1. Mental model
 
-nojsx is a class-based UI system centered on explicit component instances, local state, and DOM replacement.
+noJSX is a class-based UI system centered on explicit component instances, local state, and DOM replacement.
 
 What it is:
 
 - a TypeScript-first JSX runtime,
 - a client-side component system built around `NComponent`,
-- a browser-local runtime with delegated event wiring and UI re-initialization.
+- a browser-local runtime with delegated event wiring and UI re-initialization,
+- a server handshake path for component state and method calls.
 
 What it is not:
 
@@ -26,14 +27,13 @@ What it is not:
 - not a hydration framework,
 - not SSR,
 - not server/client dual execution,
-- not a backend transport layer,
-- not an API abstraction.
+- not a framework-level backend abstraction.
 
-The correct framing is: nojsx renders and updates UI in the browser. Anything involving persistence, network requests, authentication exchange, or backend coordination belongs to application code outside the nojsx runtime contract.
+The correct framing is: noJSX renders and updates UI in the browser, while the app server can participate in server-backed component calls and same-origin passthroughs. Broader backend coordination still belongs to application code.
 
-## 2. Naming boundary: nojsx vs `nojsx`
+## 2. Naming boundary: noJSX vs `nojsx`
 
-The package and docs now refer to the client-only runtime as nojsx. Some internals are intentionally still named with `nojsx` prefixes because they descend from the older shared code and tooling surface.
+The package and docs now refer to the current runtime as noJSX. Some internals are intentionally still named with `nojsx` prefixes because they descend from older shared code and tooling surface.
 
 You will still encounter names such as:
 
@@ -45,12 +45,12 @@ You will still encounter names such as:
 
 Current rule:
 
-- product and architecture language should say nojsx,
+- product and architecture language should say noJSX,
 - existing internal symbol names remain valid until explicitly renamed,
-- consumers should not map old `nojsx` identifiers back onto current nojsx behavior,
-- `nojsx` should be understood as the older server-plus-client variant, not as another name for current nojsx.
+- consumers should not map old `nojsx` identifiers back onto current noJSX behavior,
+- legacy names should not be used to infer unsupported framework semantics.
 
-Legacy naming inside the codebase does not mean nojsx still carries server behavior.
+Legacy naming inside the codebase does not define the architecture; the exported API does.
 
 ## 3. Runtime surface and component authoring
 
@@ -59,12 +59,14 @@ Consumer applications import runtime modules from package exports and write UI u
 In practice:
 
 - consuming code renders class-based components and intrinsic JSX tags,
+- components can call server-owned methods with `callOnServerAsync(...)`,
+- `serverLoad` can return initial state/snapshots for a component instance,
 - package authors edit runtime source files directly,
 - type declarations are emitted by TypeScript from source.
 
 ## 4. The `NComponent` contract
 
-nojsx features are authored as `NComponent` classes.
+noJSX features are authored as `NComponent` classes.
 
 Authoring rules:
 
@@ -81,18 +83,22 @@ export class ExamplePanel extends NComponent {
 
 	toggle = () => {
 		this.state.open = !this.state.open;
-		this.update();
+		this.render();
+	};
+
+	serverLoad = () => {
+		return { args: { openedAt: Date.now() } };
 	};
 
 	onLoad = () => {
-		// browser-only setup
+		// browser-side setup after server handshake
 	};
 
 	onUnload = () => {
-		// browser-only cleanup
+		// browser-side cleanup
 	};
 
-	render = () => {
+	html = () => {
 		return <button onclick={this.toggle}>Toggle</button>;
 	};
 }
@@ -102,11 +108,12 @@ Avoid method shorthand for component behavior because the component model and su
 
 ## 5. Lifecycle intent
 
-Lifecycle in nojsx is explicit and client-local.
+Lifecycle in noJSX is explicit and client-local.
 
-- `onLoad(args?)`: runs before the first real client render when the instance is initialized.
-- `render()`: returns the component UI for the current state.
-- `update()` or equivalent runtime-driven refresh path: causes browser DOM replacement/update work for that instance.
+- `serverLoad(args?)`: runs on the server side when the client requests the initial handshake for an instance.
+- `onLoad(args?)`: runs in the browser after the server handshake and before the first real render completes.
+- `html()`: returns the component UI for the current state.
+- `render()`: triggers DOM replacement/update work for that instance.
 - `onUnload(args?)`: runs when the instance is actually removed from the runtime registry.
 
 Correct use of lifecycle hooks:
@@ -114,61 +121,60 @@ Correct use of lifecycle hooks:
 - DOM-adjacent browser setup,
 - event listener registration outside normal delegated handlers,
 - timer setup and cleanup,
-- integration with browser-only third-party widgets.
+- integration with browser-side third-party widgets.
 
 Incorrect use of lifecycle hooks:
 
-- assuming server prepass execution,
-- assuming request-scoped data loading,
+- assuming SSR,
+- assuming framework loader semantics,
 - embedding backend protocol semantics as framework behavior,
-- treating `onLoad` as a server bootstrap phase.
+- treating `onLoad` as the server phase instead of `serverLoad`.
 
 ## 6. Runtime behavior and event wiring
 
-nojsx produces HTML and associates behavior through runtime-managed maps and delegated attributes such as `data-action` and `data-on-*`.
+noJSX produces HTML and associates behavior through runtime-managed maps and delegated attributes such as `data-action` and `data-on-*`.
 
 Implications:
 
 - handlers must be passed in a form the runtime can register,
 - event wiring is not React synthetic events,
-- runtime updates replace or patch DOM according to nojsx rules,
+- runtime updates replace or patch DOM according to noJSX rules,
 - UI behavior must tolerate DOM refresh cycles.
 
 This matters operationally because assumptions imported from virtual-DOM frameworks frequently lead to the wrong debugging path. When behavior breaks, inspect generated markup, event registration, and lifecycle timing in browser terms, not React reconciliation terms.
 
-## 7. Browser-only means browser-only
+## 7. Server boundary and network ownership
 
-This is the central architectural constraint and should be enforced aggressively in consuming projects.
-
-nojsx does not do:
+noJSX does not do:
 
 - server rendering,
-- API route generation,
-- action serialization,
-- backend mutation dispatch,
-- socket synchronization,
-- automatic loader execution on the server,
+- framework loaders/actions,
 - server/client component splitting,
-- request-bound dependency injection.
+- automatic API design for your backend.
 
-If an application needs backend communication, the application should implement it directly using its own network layer. nojsx can call that code from browser-side component logic, but nojsx itself is not the transport abstraction.
+noJSX does support:
+
+- server-backed component calls over its websocket transport,
+- `serverLoad` for initial component handshake payloads,
+- app-server request interception through `startNojsxServer({ handleRequest })`,
+- server-side forwarding to upstream RPC hosts through `nojsx/server/upstream-host-proxy`.
 
 Practical consequence:
 
-- fetch data from browser code when needed,
-- persist application state through app-owned APIs,
-- keep server concerns outside nojsx package assumptions,
-- never describe nojsx components as dual-run or server-aware unless you are explicitly documenting external app infrastructure.
+- keep UI state and rendering behavior in components,
+- keep upstream service access on the server when the client should stay same-origin,
+- use app-owned APIs and contracts for broader backend concerns,
+- never describe noJSX as SSR-aware or isomorphic.
 
 ## 8. UI plugin and icon re-initialization
 
-After `render()` and runtime DOM replacement/update operations, nojsx re-initializes supported UI integrations.
+After `render()` and runtime DOM replacement/update operations, noJSX re-initializes supported UI integrations.
 
-Consumers should generally not add duplicate “after every render” bootstrap code for standard nojsx updates.
+Consumers should generally not add duplicate “after every render” bootstrap code for standard noJSX updates.
 
 Only add custom re-initialization code when:
 
-- integrating a library nojsx does not already refresh,
+- integrating a library noJSX does not already refresh,
 - a widget requires instance-specific setup outside normal runtime hooks,
 - the application intentionally overrides default runtime behavior.
 
@@ -184,7 +190,7 @@ Current consumer expectations:
 - route metadata (when used by the app) is consumed on the client,
 - page transitions remain a client concern.
 
-This is not server routing in framework terms. It is client-side component loading and route mapping.
+This is not SSR routing in framework terms. It is route mapping plus browser-side page hosting.
 
 ## 10. How to change a component safely
 
@@ -198,40 +204,40 @@ When modifying a component in this package:
 
 ## 11. Common misconceptions to reject
 
-These assumptions are wrong in nojsx projects and should be corrected immediately in reviews, prompts, and implementation plans.
+These assumptions are wrong in noJSX projects and should be corrected immediately in reviews, prompts, and implementation plans.
 
 - “This component can do part of its work on the server.”
 - “We should split this into server and client components.”
-- “The framework probably has a built-in mutation transport.”
 - “`onLoad` is similar to a loader or server prefetch.”
 - “We need hydration language to explain startup.”
 - “Generated page loaders mean SSR-aware routing.”
-- “Internal `nojsx` names mean nojsx still supports the old server-plus-client model.”
+- “Internal `nojsx` names define framework-style semantics.”
 
 Replace them with the correct statements:
 
-- nojsx runs in the browser.
+- noJSX runs in the browser.
 - Components are client-side instances.
-- Networking is application code.
-- Runtime startup is client bootstrap, not hydration.
+- Server-backed component calls exist, but they are not SSR.
+- Runtime startup is client bootstrap plus server handshake, not hydration.
 
 ## 12. Review criteria for component changes
 
-When reviewing nojsx component work, look for the following:
+When reviewing noJSX component work, look for the following:
 
-- the change respects browser-only execution,
-- no server/client split language was introduced,
+- the change respects the browser-first runtime model,
+- no SSR/server-component language was introduced,
 - lifecycle usage is explicit and justified,
 - class-field method style is preserved,
 - consumer-facing docs do not borrow semantics from React-style framework vocabulary.
 
 ## 13. Short operational summary
 
-Use this package as a client UI runtime.
+Use this package as a browser-first UI runtime with a small app server.
 
 - Build UI as `NComponent` classes.
-- Treat nojsx as browser-local.
+- Treat noJSX as browser-local for rendering.
+- Use the server runtime for `serverLoad`, `callOnServerAsync(...)`, and app-owned same-origin passthroughs.
 - Compile before release.
-- Keep backend concerns outside the nojsx runtime model.
+- Keep broader backend concerns outside the noJSX runtime model.
 
 That framing prevents nearly all recurring misconceptions.

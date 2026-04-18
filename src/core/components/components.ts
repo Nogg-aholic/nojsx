@@ -1,4 +1,5 @@
 import { clearInlineHandlersForComponent, injectAttributes, setRenderContext } from '../../jsx-dev-runtime.js';
+import { getRpcMethodName, type RpcMethodRef } from '@nogg-aholic/nrpc';
 import { extendShellBridge, createGetShellFunctionServer } from './get-shell.js';
 import { nContext, componentRegistry, functionToMethodName, type nojsxGlobals } from '../components/registry.js';
 import { ensureConnected } from '../transport/client/connection.js';
@@ -6,7 +7,16 @@ import { sendRpcToServerAwait } from '../transport/client/sender.js';
 import { sendRenderComponent, sendUpdateHtml } from '../transport/server/sender.js';
 import { applyComponentSnapshot } from '../util/component-snapshot.js';
 
-type RpcArgsFor<T extends (...args: any[]) => any> = Parameters<T> extends [] ? undefined : Parameters<T> extends [infer A] ? A : Parameters<T>;
+type RpcCallable = ((...args: any[]) => any) | RpcMethodRef<any[], any>;
+
+type RpcArgsFor<T extends RpcCallable> = Parameters<T> extends [] ? undefined : Parameters<T>;
+
+type RpcSingleArgValue<T extends RpcCallable> =
+	Parameters<T> extends [infer A]
+		? A
+		: Parameters<T> extends [(infer A)?]
+			? A
+			: never;
 
 type ServerLoadHandshakeResponse = {
 	args?: unknown;
@@ -141,7 +151,10 @@ export abstract class NComponent {
 		return undefined;
 	};
 
-	callOnServerAsync = <T extends (...args: any[]) => any>(method: T, args?: RpcArgsFor<T>): Promise<Awaited<ReturnType<T>>> => {
+	callOnServerAsync: {
+		<T extends RpcCallable>(method: T, arg: RpcSingleArgValue<T>): Promise<Awaited<ReturnType<T>>>;
+		<T extends RpcCallable>(method: T, args?: RpcArgsFor<T>): Promise<Awaited<ReturnType<T>>>;
+	} = <T extends RpcCallable>(method: T, args?: RpcSingleArgValue<T> | RpcArgsFor<T>): Promise<Awaited<ReturnType<T>>> => {
 		if (isServer) {
 			return Promise.reject(new Error('upstream proxy route not yet handled'));
 		}
@@ -152,7 +165,7 @@ export abstract class NComponent {
 		const methodName =
 			resolved && resolved.componentId === this.id
 				? resolved.methodName
-				: (method as unknown as { __nojsxRpcName?: string })?.__nojsxRpcName;
+				: getRpcMethodName(method as unknown as RpcMethodRef);
 		const targetComponentId = resolved && resolved.componentId === this.id ? this.id : '';
 
 		if (typeof methodName !== 'string' || methodName.length === 0) {

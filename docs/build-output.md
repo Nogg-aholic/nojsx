@@ -1,6 +1,6 @@
-# nojsx Build Output
+# noJSX Build Output
 
-nojsx emits runtime and declaration outputs directly from TypeScript sources into `dist/`.
+noJSX emits runtime and declaration outputs directly from TypeScript sources into `dist/`.
 
 Current rule:
 

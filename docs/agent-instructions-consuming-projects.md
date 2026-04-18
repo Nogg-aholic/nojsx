@@ -1,19 +1,22 @@
-# nojsx Agent Instructions For Consuming Projects
+# noJSX Agent Instructions For Consuming Projects
 
-Use nojsx as a browser-only UI runtime.
+Use noJSX as a browser-first UI runtime with an app-side server.
 
 ## Core rules
 
-- Treat nojsx as client-only. No server components, SSR, hydration model, server actions, RPC layer, or transport semantics are provided by nojsx.
-- `NComponent` classes execute in browser runtime terms. `onLoad` and `onUnload` are client lifecycle hooks, not server phases.
-- Internal `nojsx` names still exist. They come from the older server-plus-client variant and are not architectural signals for current nojsx.
+- Do not treat noJSX as SSR, hydration, or server/client component splitting.
+- `NComponent` classes are browser-facing components, but noJSX also provides an app server runtime for websocket-backed server calls and request handling.
+- `onLoad` and `onUnload` are client lifecycle hooks. `serverLoad` is the server handshake path.
+- Internal `nojsx` names still exist. They are implementation names, not evidence of framework-style isomorphic rendering.
 
 ## Authoring expectations
 
 - Build pages and features as `NComponent` classes.
 - Define component methods and handlers as class fields with `=`.
 - Keep state, rendering, and browser-side behavior inside the component.
-- Put networking in app-owned browser code when needed. Do not invent nojsx server abstractions.
+- Use `callOnServerAsync(...)` for component-triggered server work.
+- Use `nojsx/start-nojsx-server` when the app needs the noJSX server runtime.
+- Use app-owned request passthroughs for same-origin access to upstream docs or services.
 
 ## Build and packaging
 
@@ -25,16 +28,16 @@ Use nojsx as a browser-only UI runtime.
 
 - Do not assume React semantics.
 - Do not assume Next.js or Remix patterns.
-- Do not split logic into server/client variants unless the consuming app explicitly adds its own non-nojsx infrastructure.
+- Do not split UI into framework-style server/client component variants.
 - Do not add duplicate bootstrap code for delegated events or standard runtime UI re-init unless overriding defaults intentionally.
 
 ## Preferred language
 
-- Say: browser runtime, client-side component, route metadata, component instance, client bootstrap.
-- Avoid: hydration, server loader, server component, action endpoint, framework RPC, isomorphic render.
+- Say: browser runtime, component instance, app server, server-backed component call, same-origin passthrough.
+- Avoid: hydration, server component, action endpoint, framework RPC, isomorphic render.
 
 ## Decision test
 
-Before proposing architecture or code, ask: “Is this behavior owned by nojsx runtime in the browser, or by the consuming app outside nojsx?”
+Before proposing architecture or code, ask: “Is this behavior owned by the browser runtime, by the noJSX app server, or by app-specific infrastructure outside noJSX?”
 
-If it is not clearly browser-runtime behavior, do not assign it to nojsx.
+If it is not clearly browser runtime or documented noJSX app-server behavior, do not assign it to noJSX.

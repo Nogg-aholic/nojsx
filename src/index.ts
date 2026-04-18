@@ -11,6 +11,3 @@ export * from './core/util/client-bootstrap.js';
 export * from './core/util/component-snapshot.js';
 export * from './core/util/shell-page-parent-renderer.js';
 export * from './core/util/slots.js';
-export * from './core/util/util.js';
-
-export type * from './core/types/index.js';

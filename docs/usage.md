@@ -1,18 +1,20 @@
-# nojsx Usage Guide
+# noJSX Usage Guide
 
-This guide is for app authors using `nojsx` to build browser-rendered UI.
+This guide is for app authors using `noJSX` to build browser-rendered UI with an app-side server runtime.
 
 It focuses on the current runtime model:
-- browser-only,
+- browser-first,
 - class-based components,
 - JSX compiled with `jsxImportSource: nojsx`,
-- client-side shell and route hosting.
+- client-side shell and route hosting,
+- websocket-backed component server calls,
+- app-owned request handling at the noJSX server boundary.
 
 For deeper runtime internals, see [components.md](components.md).
 
-## 1. What you build with nojsx
+## 1. What you build with noJSX
 
-A typical nojsx app has three layers:
+A typical noJSX app has three layers:
 - a shell component that owns the app layout,
 - page components rendered inside the shell,
 - reusable nested components with local state.
@@ -46,7 +48,7 @@ Reference: [examples/nojsx-minimal/tsconfig.json](../examples/nojsx-minimal/tsco
 
 ### Package dependency
 
-Consumer apps install `nojsx` like a normal dependency. In this repo's examples it is consumed from a local tarball:
+Consumer apps install `nojsx` like a normal dependency. In this repo's examples, noJSX is consumed from a local tarball:
 
 ```json
 {
@@ -68,7 +70,7 @@ Files using JSX should declare the runtime source:
 
 ## 3. Authoring a component
 
-nojsx components are classes. Reusable UI typically extends `NComponent`.
+noJSX components are classes. Reusable UI typically extends `NComponent`.
 
 ```tsx
 /** @jsxImportSource nojsx */
@@ -165,7 +167,7 @@ See also:
 
 ## 6. State and re-rendering
 
-nojsx does not use React hooks. State is usually just instance fields.
+noJSX does not use React hooks. State is usually just instance fields.
 
 Typical pattern:
 - store state on `this`,
@@ -220,122 +222,152 @@ For consumer apps:
 
 ## 9. Development workflow in this repo
 
-For the repo itself:
+For the `noJSX` package itself:
 
 ```bash
 bun run build
 ```
 
-Builds the library and support scripts.
+Builds the library and support scripts into `dist/`.
 
-To package the library for local example consumption:
+To build and pack the library for local example consumption:
 
 ```bash
-bun run pack:tgz
+bun run compile
 ```
 
-To refresh the examples against the current package:
+This writes `nojsx.tgz` in the package root.
+
+To validate the minimal example against the packed tarball:
 
 ```bash
-bun run refresh:examples
-```
-
-To validate the minimal example package flow:
-
-```bash
-bun run test:tgz:minimal
+cd ../examples/nojsx-minimal
+bun install
+bunx tsc -p ./tsconfig.json --pretty false
+bun run build
 ```
 
 References:
 - [README.md](../README.md)
 - [scripts/refresh-examples.ts](../scripts/refresh-examples.ts)
 
-## 10. Using the inflight build without running a server
+## 10. App server and server-side request handling
 
-The inflight build path can be used directly without starting the Live Preview extension server.
+The package export `nojsx/start-nojsx-server` starts the app server used by the examples.
 
-The public entrypoint is the package export:
-- [package.json](../package.json)
-
-It exposes:
+Minimal shape:
 
 ```ts
-import { renderLivePreview } from "nojsx/live-preview-runner";
-```
+import { startNojsxServer } from "nojsx/start-nojsx-server";
 
-This runner takes a TSX file plus source text, compiles it through the live-preview pipeline, and returns HTML.
-
-Minimal example:
-
-```ts
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { renderLivePreview } from "nojsx/live-preview-runner";
-
-const filePath = path.resolve("src/app.tsx");
-const sourceText = await readFile(filePath, "utf8");
-
-const html = await renderLivePreview({
-  filePath,
-  sourceText,
-  serverSessionId: "manual-preview-session"
+await startNojsxServer({
+  serverModuleUrl: import.meta.url,
+  logPrefix: "[my-app]",
 });
-
-console.log(html);
 ```
 
-What to pass:
-- `filePath`: absolute path to the TSX entry file.
-- `sourceText`: the current source text to compile.
-- `serverSessionId` or `serverProcessRef`: optional stable cache key if you want to reuse the inflight compiler state across repeated renders.
-- `requestPath`: optional route path when previewing shell-based apps.
-- `httpPort`: optional. Only needed when you specifically want generated browser preview modules to point at a running HTTP host.
+`StartNojsxServerOptions` also supports `handleRequest`, which lets the app intercept HTTP requests before static asset handling.
 
-For no-server usage, the normal path is:
-- omit `httpPort`,
-- call `renderLivePreview(...)`,
-- consume the returned HTML string directly.
+This is the right place to add same-origin passthrough routes for docs or other server-owned resources.
 
-Why this works:
-- the runner creates a temporary request workspace,
-- compiles the entry through the live-preview compiler,
-- reuses inflight incremental compiler state when you keep the same session id,
-- returns the rendered HTML without needing the extension's HTTP content loader.
+Example pattern from `examples/nojsx-minimal`:
 
-Important limitation:
-- this does not create a standalone app server,
-- it is for HTML generation and repeated preview-style recompiles,
-- if your rendered output expects browser-loaded modules or assets from an HTTP origin, you must provide that hosting separately.
+```ts
+await startNojsxServer({
+  serverModuleUrl: import.meta.url,
+  handleRequest: async (request) => {
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith("/vscode/__docs/")) return null;
 
-If you want to measure or exercise just the compile side, the repo also includes a local benchmark entry that calls the same compile helper directly:
-- [src/live-preview/bench-live-preview-compile.ts](../src/live-preview/bench-live-preview-compile.ts)
+    const upstreamUrl = new URL(`http://127.0.0.1:43111${url.pathname}${url.search}`);
+    const upstreamResponse = await fetch(upstreamUrl);
+    return new Response(upstreamResponse.body, {
+      status: upstreamResponse.status,
+      headers: upstreamResponse.headers,
+    });
+  },
+});
+```
 
-## 11. Minimal mental model
+This keeps the browser on the app origin while the server talks to the upstream proxy.
 
-Use nojsx like this:
+## 11. Server-backed component calls
+
+Components can call server-owned methods with `callOnServerAsync(...)`.
+
+Common patterns:
+
+- `serverLoad = () => ...` for initial handshake state,
+- component methods that run on the server and are invoked from the browser,
+- server-owned imports inside those methods.
+
+Example pattern:
+
+```tsx
+loadCommandsFromServer = async (): Promise<string[]> => {
+  const { vscode } = await import("../server/vscode-rpc.js");
+  return vscode.commands.getCommands(true);
+};
+
+loadCommands = async () => {
+  this.commands = await this.callOnServerAsync(this.loadCommandsFromServer);
+  this.render();
+};
+```
+
+References:
+
+- [examples/nojsx-minimal/src/components/host-proxy-demo.tsx](../examples/nojsx-minimal/src/components/host-proxy-demo.tsx)
+- [examples/nojsx-minimal/src/components/persistent-counter.tsx](../examples/nojsx-minimal/src/components/persistent-counter.tsx)
+
+## 12. Upstream host RPC
+
+`nojsx/server/upstream-host-proxy` configures server-side forwarding to an upstream RPC host.
+
+Typical setup:
+
+```ts
+import { configureUpstreamHostRpc } from "nojsx/server/upstream-host-proxy";
+
+configureUpstreamHostRpc("vscode", {
+  rpcEndpoint: "http://127.0.0.1:43111/rpc",
+  wsEndpoint: "ws://127.0.0.1:43111/ws",
+});
+```
+
+Then server methods can call that upstream through `invokeUpstreamHostRpc(...)` or a typed wrapper.
+
+Reference:
+
+- [examples/nojsx-minimal/src/server-startup.ts](../examples/nojsx-minimal/src/server-startup.ts)
+- [examples/nojsx-minimal/src/server/vscode-rpc.ts](../examples/nojsx-minimal/src/server/vscode-rpc.ts)
+
+## 13. Minimal mental model
+
+Use noJSX like this:
 - build class-based browser components,
 - render JSX through `html`,
 - update local instance state directly,
 - call `this.render()` when state changes,
 - host page content in `NavOutlet`,
 - navigate through the shell,
-- keep backend and transport concerns outside the runtime.
+- use the app server for server-owned methods and request passthrough,
+- keep direct browser-to-upstream connections out of the client when the server can own them.
 
-## 12. Common mistakes
+## 14. Common mistakes
 
-Do not assume nojsx is:
+Do not assume noJSX is:
 - React,
 - SSR,
 - hydration,
-- server/client split rendering,
-- built-in transport or backend orchestration.
+- server/client split rendering.
 
 Do not use:
 - method shorthand inside component classes,
 - React hook mental models,
-- server lifecycle language when describing client components.
+- direct browser connections to upstream services when the app server should proxy them.
 
-## 13. Where to go next
+## 15. Where to go next
 
 - Runtime/component details: [components.md](components.md)
 - Generation and loader pipeline: [generation-pipeline.md](generation-pipeline.md)

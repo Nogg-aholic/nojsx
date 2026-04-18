@@ -143,7 +143,6 @@ function rewriteNojsxSelfImports(fromFile: string, contents: string): string {
   const patterns = [
     /(from\s*)(["'])nojsx\/([^"']+)\2/g,
     /(import\(\s*)(["'])nojsx\/([^"']+)\2/g,
-    /(["'])nojsx\/([^"']+)\1/g,
   ] as const;
 
   let next = contents;
@@ -155,9 +154,7 @@ function rewriteNojsxSelfImports(fromFile: string, contents: string): string {
         const subpath = args[3];
         return `${prefix}${quote}${rewriteSpecifier(subpath)}${quote}`;
       }
-      const quote = args[1];
-      const subpath = args[2];
-      return `${quote}${rewriteSpecifier(subpath)}${quote}`;
+      return args[0];
     });
   }
 

@@ -8,7 +8,7 @@ import { nojsxGlobals } from './core/components/registry.js';
 import { componentRegistry } from './core/components/registry.js';
 import type { nojsxComponent } from './core/types/index.js';
 import { renderSlotChildren, join as _join } from './core/util/util.js';
-import { NComponent, NComponentProps } from './core/components/components.js';
+import { NComponentProps } from './core/components/components.js';
 
 // Make join function globally available
 (globalThis as any).join = _join;

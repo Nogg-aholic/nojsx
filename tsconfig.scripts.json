@@ -5,7 +5,7 @@
     "moduleResolution": "Bundler",
     "types": ["node", "bun"],
     "sourceMap": true,
-    "declaration": false,
+    "declaration": true,
     "outDir": "./dist/scripts",
     "rootDir": "./scripts",
     "skipLibCheck": true

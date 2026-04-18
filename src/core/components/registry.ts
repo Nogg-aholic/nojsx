@@ -1,5 +1,6 @@
 // Component Registry
 
+import { createRpcProxy } from '@nogg-aholic/nrpc';
 import { NComponent } from '../components/components.js';
 
 
@@ -24,23 +25,7 @@ export function createHostRpcProxy(pathParts: string[] = []): unknown {
         return globals.__nojsxHostRpcProxyCache.get(cacheKey);
     }
 
-    const proxy = new Proxy(function () {}, {
-        get(_target, property) {
-            if (property === '__nojsxRpcName') {
-                return cacheKey;
-            }
-            if (property === 'then' && cacheKey.length === 0) {
-                return undefined;
-            }
-            if (typeof property === 'symbol') {
-                return undefined;
-            }
-            return createHostRpcProxy([...pathParts, String(property)]);
-        },
-        apply() {
-            throw new Error(`Host RPC reference ${cacheKey || '<root>'} cannot be invoked directly. Use callOnServerAsync().`);
-        },
-    });
+    const proxy = createRpcProxy(pathParts);
 
     globals.__nojsxHostRpcProxyCache.set(cacheKey, proxy);
     return proxy;
