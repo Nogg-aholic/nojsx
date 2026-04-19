@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -44,6 +44,28 @@ function resolveTailwindCliEntry(builderRoot: string): string {
     }
 
     return path.resolve(path.dirname(cliPackageJsonPath), binValue);
+}
+
+function resolveBundledTailwindImport(builderRoot: string): string {
+    const requireFromBuilder = createRequire(path.join(builderRoot, "package.json"));
+    return pathToFileURL(requireFromBuilder.resolve("tailwindcss/index.css")).href;
+}
+
+function resolveBundledFormsPlugin(builderRoot: string): string {
+    const requireFromBuilder = createRequire(path.join(builderRoot, "package.json"));
+    return pathToFileURL(requireFromBuilder.resolve("@tailwindcss/forms")).href;
+}
+
+async function writeStagedTailwindInput(inputPath: string, builderRoot: string): Promise<string> {
+    const source = await readFile(inputPath, "utf8");
+    const tempDir = await mkdtemp(path.join(builderRoot, ".tailwind-build-"));
+    const stagedInputPath = path.join(tempDir, "entry.css");
+    const rewrittenSource = source
+        .replace(/@import\s+["']tailwindcss["'];/g, `@import ${JSON.stringify(resolveBundledTailwindImport(builderRoot))};`)
+        .replace(/@plugin\s+["']@tailwindcss\/forms["'];/g, `@plugin ${JSON.stringify(resolveBundledFormsPlugin(builderRoot))};`);
+
+    await writeFile(stagedInputPath, rewrittenSource, "utf8");
+    return stagedInputPath;
 }
 
 export type TailwindCliOptions = {
@@ -102,12 +124,8 @@ export function parseTailwindCliArgs(argv: string[]): TailwindCliOptions {
 
 export async function runTailwindCli(options: TailwindCliOptions, builderRoot: string): Promise<number> {
     const cliEntry = resolveTailwindCliEntry(builderRoot);
-    const tempDir = await mkdtemp(path.join(builderRoot, ".tailwind-build-"));
-    const stagedInputPath = path.join(tempDir, "entry.css");
-    const sourceImportUrl = pathToFileURL(options.input).href;
-    const stagedSource = `@import ${JSON.stringify(sourceImportUrl)};\n`;
-
-    await writeFile(stagedInputPath, stagedSource, "utf8");
+    const stagedInputPath = await writeStagedTailwindInput(options.input, builderRoot);
+    const stagedInputDir = path.dirname(stagedInputPath);
 
     try {
         const args = [
@@ -125,14 +143,14 @@ export async function runTailwindCli(options: TailwindCliOptions, builderRoot: s
         }
 
         const proc = Bun.spawn([process.execPath, ...args], {
-            cwd: builderRoot,
+            cwd: options.cwd,
             stdout: "inherit",
             stderr: "inherit",
         });
 
         return await proc.exited;
     } finally {
-        await rm(tempDir, { recursive: true, force: true });
+        await rm(stagedInputDir, { recursive: true, force: true });
     }
 }
 

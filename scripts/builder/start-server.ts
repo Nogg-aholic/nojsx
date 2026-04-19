@@ -122,6 +122,29 @@ function resolvePackageAssetPath(root: string, requestPath: string, prefix: stri
 	return resolveSafePath(root, relativePath);
 }
 
+function resolveServedFilePath(filePath: string | null): string | null {
+	if (!filePath) {
+		return null;
+	}
+
+	if (existsSync(filePath)) {
+		return filePath;
+	}
+
+	if (!path.extname(filePath)) {
+		const withJs = `${filePath}.js`;
+		const asIndexJs = path.join(filePath, 'index.js');
+		if (existsSync(withJs)) {
+			return withJs;
+		}
+		if (existsSync(asIndexJs)) {
+			return asIndexJs;
+		}
+	}
+
+	return null;
+}
+
 function normalizeRequestPath(url: URL): string {
 	if (url.pathname === '/' || url.pathname === '/index.html') {
 		return 'index.html';
@@ -164,14 +187,14 @@ export async function startNojsxServer(options: StartNojsxServerOptions): Promis
 			}
 
 			const requestUrl = new URL(request.url);
-			const nojsxPackageAssetPath = resolvePackageAssetPath(nojsxDistRoot, requestUrl.pathname, '/_pkg/nojsx/');
-			if (nojsxPackageAssetPath && existsSync(nojsxPackageAssetPath)) {
+			const nojsxPackageAssetPath = resolveServedFilePath(resolvePackageAssetPath(nojsxDistRoot, requestUrl.pathname, '/_pkg/nojsx/'));
+			if (nojsxPackageAssetPath) {
 				const body = await readFile(nojsxPackageAssetPath);
 				return new Response(body, { status: 200, headers: responseHeaders(contentType(nojsxPackageAssetPath)) });
 			}
 
-			const nrpcPackageAssetPath = resolvePackageAssetPath(nrpcDistRoot, requestUrl.pathname, '/_pkg/nrpc/');
-			if (nrpcPackageAssetPath && existsSync(nrpcPackageAssetPath)) {
+			const nrpcPackageAssetPath = resolveServedFilePath(resolvePackageAssetPath(nrpcDistRoot, requestUrl.pathname, '/_pkg/nrpc/'));
+			if (nrpcPackageAssetPath) {
 				const body = await readFile(nrpcPackageAssetPath);
 				return new Response(body, { status: 200, headers: responseHeaders(contentType(nrpcPackageAssetPath)) });
 			}

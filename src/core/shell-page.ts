@@ -200,10 +200,12 @@ export function renderDevHtmlDocument(params: {
     title: shellLayout.title,
     importMap: {
       "@nogg-aholic/nojsx": `${origin}/_pkg/nojsx/index.js`,
+      "@nogg-aholic/nojsx/": `${origin}/_pkg/nojsx/`,
       "@nogg-aholic/nojsx/index.js": `${origin}/_pkg/nojsx/index.js`,
       "@nogg-aholic/nojsx/jsx-runtime": `${origin}/_pkg/nojsx/jsx-runtime.js`,
       "@nogg-aholic/nojsx/jsx-dev-runtime": `${origin}/_pkg/nojsx/jsx-dev-runtime.js`,
       "@nogg-aholic/nrpc": `${origin}/_pkg/nrpc/index.js`,
+      "@nogg-aholic/nrpc/": `${origin}/_pkg/nrpc/`,
     },
     cspNonce: shellLayout.cspNonce,
     cspContent:
