@@ -101,8 +101,8 @@ async function writeOutputHtml(paths: BuildNojsxAppResolvedPaths, preparation: B
 
 async function writeGeneratedLoaders(paths: BuildNojsxAppResolvedPaths): Promise<void> {
 	const loaderJsxImportSource = paths.jsxImportSource === "nojsx/index" || paths.jsxImportSource === "nojsx/index.js"
-		? "nojsx"
-		: "nojsx";
+		? "@nogg-aholic/nojsx"
+		: paths.jsxImportSource;
 	const loaders = await buildGeneratedLoadersModule({
 		pagesDir: paths.pagesRoot,
 		shellPagePath: paths.shellPagePath,
