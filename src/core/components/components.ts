@@ -5,7 +5,7 @@ import { nContext, componentRegistry, functionToMethodName, type nojsxGlobals } 
 import { ensureConnected } from '../transport/client/connection.js';
 import { sendRpcToServerAwait } from '../transport/client/sender.js';
 import { sendRenderComponent, sendUpdateHtml } from '../transport/server/sender.js';
-import { applyComponentSnapshot } from '../util/component-snapshot.js';
+import { applyComponentSnapshot, type ComponentSnapshot } from '../util/component-snapshot.js';
 
 type RpcCallable = ((...args: any[]) => any) | RpcMethodRef<any[], any>;
 
@@ -21,7 +21,7 @@ type RpcSingleArgValue<T extends RpcCallable> =
 type ServerLoadHandshakeResponse = {
 	args?: unknown;
 	__state?: Record<string, unknown>;
-	__snapshot?: Record<string, unknown>;
+	__snapshot?: Partial<ComponentSnapshot<NComponent>>;
 };
 
 type nojsxClientDebugGlobals = {
@@ -38,7 +38,7 @@ async function runClientLoadWrapper(instance: NComponent): Promise<void> {
 	const res = (await instance.callOnServerAsync(instance.__nojsxServerLoad, undefined)) as ServerLoadHandshakeResponse | null | undefined;
 	const snapshot = res?.__snapshot;
 	if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
-		applyComponentSnapshot(instance as unknown as Record<string, unknown>, snapshot);
+		applyComponentSnapshot(instance, snapshot);
 	}
 	try {
 		const state = res?.__state;

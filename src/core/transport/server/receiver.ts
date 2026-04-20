@@ -1,9 +1,9 @@
-import { stateCache } from '../../components/components.js';
+import { NComponent, stateCache } from '../../components/components.js';
 import { componentRegistry } from '../../components/registry.js';
 import { nojsxWSEvent } from '../events.js';
 import { decodeRpcAwaitMessage, decodeRpcValue } from '@nogg-aholic/nrpc';
 import { getRpcMethodName } from '@nogg-aholic/nrpc';
-import { createComponentSnapshot } from '../../util/component-snapshot.js';
+import { createComponentSnapshot, type ComponentSnapshot } from '../../util/component-snapshot.js';
 import { constructClientComponentOnServer } from './client-construct.js';
 import { sendComponentSnapshot, sendRpcReturn } from './sender.js';
 import { invokeUpstreamHostRpc } from './upstream-host-proxy.js';
@@ -14,7 +14,7 @@ const decoder = new TextDecoder();
 type ServerLoadResponse = {
   args?: unknown;
   __state?: Record<string, unknown>;
-  __snapshot?: Record<string, unknown>;
+  __snapshot?: Partial<ComponentSnapshot<NComponent>>;
 };
 function isUpstreamHostMethod(methodName: string): boolean {
   return methodName.includes('.');
@@ -124,7 +124,7 @@ export async function handleRpcAwaitFromClient(data: Uint8Array, requesterSocket
   }
 
   const entry = componentRegistry.get(componentId);
-  const instance = entry.result as Record<string, unknown>;
+  const instance = entry.result;
   const handler = typeof instance[methodName] === 'function'
     ? (instance[methodName] as Function)
     : entry.result.__serverHandlers?.[methodName];
@@ -149,11 +149,11 @@ export async function handleRpcAwaitFromClient(data: Uint8Array, requesterSocket
         ? (result as ServerLoadResponse)
         : { args: null };
       if (snapshot && Object.keys(snapshot).length > 0) payload.__state = snapshot;
-      payload.__snapshot = createComponentSnapshot(entry.result as Record<string, unknown>);
+      payload.__snapshot = createComponentSnapshot(entry.result);
       result = payload;
     }
     if (methodName !== 'serverLoad') {
-      sendComponentSnapshot(componentId, createComponentSnapshot(entry.result as Record<string, unknown>));
+      sendComponentSnapshot(componentId, createComponentSnapshot(entry.result));
     }
     sendRpcReturn(requestId, true, result ?? null, requesterSocket);
   } catch (error) {

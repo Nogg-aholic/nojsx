@@ -1,3 +1,11 @@
+import { NComponent } from "../components/components";
+
+export type NonFunctionPropertyNames<T> = {
+  [K in keyof T]-?: T[K] extends (...args: any[]) => any ? never : K;
+}[keyof T];
+
+export type ComponentSnapshot<T extends NComponent> = Pick<T, NonFunctionPropertyNames<T>>;
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -33,18 +41,18 @@ const excludedSnapshotKeys = new Set([
   '__mapped',
 ]);
 
-export function createComponentSnapshot(instance: Record<string, unknown>): Record<string, unknown> {
+export function createComponentSnapshot<T extends NComponent>(instance: T): Partial<ComponentSnapshot<T>> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(instance)) {
     if (excludedSnapshotKeys.has(key)) continue;
     if (typeof value === 'function') continue;
     out[key] = cloneSnapshotValue(value);
   }
-  return out;
+  return out as Partial<ComponentSnapshot<T>>;
 }
 
-export function applyComponentSnapshot(instance: Record<string, unknown>, snapshot: Record<string, unknown>): void {
+export function applyComponentSnapshot<T extends NComponent>(instance: T, snapshot: Partial<ComponentSnapshot<T>>): void {
   for (const [key, value] of Object.entries(snapshot)) {
-    instance[key] = cloneSnapshotValue(value);
+    instance[key as keyof T] = cloneSnapshotValue(value) as T[keyof T];
   }
 }
