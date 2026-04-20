@@ -3,9 +3,9 @@ import { componentRegistry } from '../../components/registry.js';
 import { nojsxWSEvent } from '../events.js';
 import { decodeRpcAwaitMessage, decodeRpcValue } from '@nogg-aholic/nrpc';
 import { getRpcMethodName } from '@nogg-aholic/nrpc';
-import { createComponentSnapshot, type ComponentSnapshot } from '../../util/component-snapshot.js';
+import { classifySnapshotChange, createComponentSnapshot, type ComponentSnapshot } from '../../util/component-snapshot.js';
 import { constructClientComponentOnServer } from './client-construct.js';
-import { sendComponentSnapshot, sendRpcReturn } from './sender.js';
+import { sendComponentSnapshot, sendComponentSnapshotSyncOnly, sendRpcReturn } from './sender.js';
 import { invokeUpstreamHostRpc } from './upstream-host-proxy.js';
 import type { ServerWebSocket } from 'bun';
 
@@ -142,6 +142,7 @@ export async function handleRpcAwaitFromClient(data: Uint8Array, requesterSocket
   }
 
   try {
+    const beforeSnapshot = methodName !== 'serverLoad' ? createComponentSnapshot(entry.result) : null;
     let result = await Promise.resolve(invokeFunction(handler, entry.result, args));
     if (methodName === 'serverLoad') {
       const snapshot = existedBefore ? getServerStateSnapshot(componentId) : null;
@@ -153,7 +154,13 @@ export async function handleRpcAwaitFromClient(data: Uint8Array, requesterSocket
       result = payload;
     }
     if (methodName !== 'serverLoad') {
-      sendComponentSnapshot(componentId, createComponentSnapshot(entry.result));
+      const afterSnapshot = createComponentSnapshot(entry.result);
+      const changeKind = classifySnapshotChange(entry.result, beforeSnapshot, afterSnapshot);
+      if (changeKind === 'render') {
+        sendComponentSnapshot(componentId, afterSnapshot);
+      } else if (changeKind === 'sync-only') {
+        sendComponentSnapshotSyncOnly(componentId, afterSnapshot);
+      }
     }
     sendRpcReturn(requestId, true, result ?? null, requesterSocket);
   } catch (error) {

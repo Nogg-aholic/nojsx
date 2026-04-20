@@ -58,6 +58,14 @@ function handleStateSync(data: Uint8Array): void {
 }
 
 function handleComponentSnapshot(data: Uint8Array): void {
+  handleComponentSnapshotInternal(data, true);
+}
+
+function handleComponentSnapshotSyncOnly(data: Uint8Array): void {
+  handleComponentSnapshotInternal(data, false);
+}
+
+function handleComponentSnapshotInternal(data: Uint8Array, shouldRender: boolean): void {
   const componentIdLen = data[1];
   const componentId = decoder.decode(data.subarray(2, 2 + componentIdLen));
   if (!componentRegistry.has(componentId)) return;
@@ -70,7 +78,7 @@ function handleComponentSnapshot(data: Uint8Array): void {
   applyComponentSnapshot(entry.result, decoded as Record<string, unknown>);
 
   const renderFn = (entry.result as any)?.render;
-  if (typeof renderFn === 'function') {
+  if (shouldRender && typeof renderFn === 'function') {
     renderFn.call(entry.result as any);
   }
 }
@@ -136,6 +144,9 @@ export function clientHandleMessage(data: Uint8Array): void {
       break;
     case nojsxWSEvent.ComponentSnapshot_S2C:
       handleComponentSnapshot(data);
+      break;
+    case nojsxWSEvent.ComponentSnapshotSyncOnly_S2C:
+      handleComponentSnapshotSyncOnly(data);
       break;
     case nojsxWSEvent.RPC_CALL_S2C:
       handleRpcFromServer(data);

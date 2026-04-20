@@ -81,12 +81,20 @@ export function sendStateSync(componentId: string, key: string, value: unknown):
 }
 
 export function sendComponentSnapshot(componentId: string, snapshot: unknown): void {
+  sendComponentSnapshotWithEvent(nojsxWSEvent.ComponentSnapshot_S2C, componentId, snapshot);
+}
+
+export function sendComponentSnapshotSyncOnly(componentId: string, snapshot: unknown): void {
+  sendComponentSnapshotWithEvent(nojsxWSEvent.ComponentSnapshotSyncOnly_S2C, componentId, snapshot);
+}
+
+function sendComponentSnapshotWithEvent(eventCode: nojsxWSEvent, componentId: string, snapshot: unknown): void {
   const componentIdBytes = encoder.encode(componentId);
   const snapshotBytes = encodeRpcValue(snapshot ?? null);
   const buf = new Uint8Array(1 + 1 + componentIdBytes.length + snapshotBytes.length);
 
   let offset = 0;
-  buf[offset++] = nojsxWSEvent.ComponentSnapshot_S2C;
+  buf[offset++] = eventCode;
   buf[offset++] = componentIdBytes.length;
   buf.set(componentIdBytes, offset);
   offset += componentIdBytes.length;

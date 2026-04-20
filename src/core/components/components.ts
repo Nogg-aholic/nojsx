@@ -5,7 +5,7 @@ import { nContext, componentRegistry, functionToMethodName, type nojsxGlobals } 
 import { ensureConnected } from '../transport/client/connection.js';
 import { sendRpcToServerAwait } from '../transport/client/sender.js';
 import { sendRenderComponent, sendUpdateHtml } from '../transport/server/sender.js';
-import { applyComponentSnapshot, type ComponentSnapshot } from '../util/component-snapshot.js';
+import { applyComponentSnapshot, captureRenderRelevantSnapshotKeys, type ComponentSnapshot } from '../util/component-snapshot.js';
 
 type RpcCallable = ((...args: any[]) => any) | RpcMethodRef<any[], any>;
 
@@ -302,10 +302,12 @@ export abstract class NComponent {
 		const prev = setRenderContext(componentId);
 		try {
 			componentRegistry.setRenderParent(componentId);
-			if (original.length === 0) {
-				return injectAttributes(String((original as unknown as () => unknown).call(this)), componentId, className);
-			}
-			return String((original as unknown as (componentId: string, className?: string) => unknown).call(this, componentId, className));
+			return captureRenderRelevantSnapshotKeys(this, () => {
+				if (original.length === 0) {
+					return injectAttributes(String((original as unknown as () => unknown).call(this)), componentId, className);
+				}
+				return String((original as unknown as (componentId: string, className?: string) => unknown).call(this, componentId, className));
+			});
 		} finally {
 			componentRegistry.setRenderParent(prevRenderParent ?? '');
 			setRenderContext(prev);

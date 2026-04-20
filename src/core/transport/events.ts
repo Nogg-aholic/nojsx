@@ -16,6 +16,7 @@ export enum nojsxWSEvent {
   UpdateHtml_S2C = 0x26,
   RPC_CALL_S2C = 0x27,
   ComponentSnapshot_S2C = 0x28,
+  ComponentSnapshotSyncOnly_S2C = 0x2C,
   SPANavigate_S2C = 0x29,
   RPC_RETURN_S2C = 0x2A,
   RPC_CALL_AWAIT_S2C = 0x2B,
