@@ -67,7 +67,7 @@ function handleComponentSnapshot(data: Uint8Array): void {
   if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) return;
 
   const entry = componentRegistry.get(componentId);
-  applyComponentSnapshot(entry.result as Record<string, unknown>, decoded as Record<string, unknown>);
+  applyComponentSnapshot(entry.result, decoded as Record<string, unknown>);
 
   const renderFn = (entry.result as any)?.render;
   if (typeof renderFn === 'function') {
