@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { cp, mkdir, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { join, dirname, relative } from 'node:path';
 
@@ -10,18 +11,18 @@ type PackageJson = {
   version: string;
 };
 
-const PACKAGE_NAME = '@nogg-aholic/nojsx';
-
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const DIST_ROOT = join(PROJECT_ROOT, 'dist');
 const SRC_ROOT = join(PROJECT_ROOT, 'src');
 const DECLARATION_FILES = ['core/types/index.d.ts'] as const;
 const NPM_COMMAND = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const PACKAGE_NAME = '@nogg-aholic/nojsx';
+const BUILD_TSCONFIG_PATH = join(PROJECT_ROOT, '.tsconfig.build.tmp.json');
 
-function run(command: string, args: string[]): Promise<void> {
+function run(command: string, args: string[], cwd = PROJECT_ROOT): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      cwd: PROJECT_ROOT,
+      cwd,
       stdio: 'inherit',
       shell: false,
     });
@@ -118,6 +119,37 @@ async function collectJsFiles(dir: string): Promise<string[]> {
 
 async function cleanDist(): Promise<void> {
   await rm(DIST_ROOT, { recursive: true, force: true });
+}
+
+function resolveNrpcDistRoot(): string {
+  const requireFromProject = createRequire(join(PROJECT_ROOT, 'package.json'));
+  const nrpcPackageJsonPath = requireFromProject.resolve('@nogg-aholic/nrpc/package.json');
+  return join(dirname(nrpcPackageJsonPath), 'dist');
+}
+
+async function writeBuildTsconfig(): Promise<string> {
+  const nrpcDistRoot = resolveNrpcDistRoot();
+  const nrpcIndexDts = toPosix(relative(PROJECT_ROOT, join(nrpcDistRoot, 'index.d.ts')));
+  const nrpcWildcard = `${toPosix(relative(PROJECT_ROOT, nrpcDistRoot))}/*`;
+  const content = JSON.stringify({
+    extends: './tsconfig.json',
+    compilerOptions: {
+      baseUrl: '.',
+      ignoreDeprecations: '6.0',
+      paths: {
+        '@nogg-aholic/nrpc': [nrpcIndexDts],
+        '@nogg-aholic/nrpc/index.js': [nrpcIndexDts],
+        '@nogg-aholic/nrpc/*': [nrpcWildcard],
+        '@nogg-aholic/nojsx/jsx-runtime': ['./src/jsx-runtime.ts'],
+        '@nogg-aholic/nojsx/jsx-dev-runtime': ['./src/jsx-dev-runtime.ts'],
+        '@nogg-aholic/nojsx': ['./src/index.ts'],
+        '@nogg-aholic/nojsx/*': ['./src/*'],
+      },
+    },
+  }, null, 2);
+
+  await Bun.write(BUILD_TSCONFIG_PATH, `${content}\n`);
+  return BUILD_TSCONFIG_PATH;
 }
 
 async function copyDeclarations(): Promise<void> {
@@ -220,16 +252,22 @@ async function packTgz(): Promise<void> {
 
 async function main(): Promise<void> {
 	const shouldPack = process.argv.includes('--pack');
+  const buildTsconfigPath = await writeBuildTsconfig();
 
-  await cleanDist();
-  await run('node', ['./node_modules/typescript/bin/tsc', '-p', 'tsconfig.json']);
-  await rewriteDistSelfImports();
-  await copyDeclarations();
-  await run('node', ['./node_modules/typescript/bin/tsc', '-p', 'tsconfig.scripts.json']);
-  await assertDistRelativeImportExtensions();
-	if (shouldPack) {
-		await packTgz();
-	}
+
+  try {
+    await cleanDist();
+    await run('node', ['./node_modules/typescript/bin/tsc', '-p', buildTsconfigPath]);
+    await rewriteDistSelfImports();
+    await copyDeclarations();
+    await run('node', ['./node_modules/typescript/bin/tsc', '-p', 'tsconfig.scripts.json']);
+    await assertDistRelativeImportExtensions();
+    if (shouldPack) {
+      await packTgz();
+    }
+  } finally {
+    await rm(buildTsconfigPath, { force: true });
+  }
 }
 
 await main();

@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { ServerWebSocket } from 'bun';
 
@@ -51,18 +50,8 @@ function resolveAppPaths(options: StartNojsxServerOptions): {
 	};
 }
 
-function resolveNrpcDistRoot(fromModuleUrl: string): string {
-	const fromFilePath = fileURLToPath(fromModuleUrl);
-	const requireFromServerModule = createRequire(fromFilePath);
-	const nrpcPackageJsonPath = requireFromServerModule.resolve('@nogg-aholic/nrpc/package.json');
-	return path.join(path.dirname(nrpcPackageJsonPath), 'dist');
-}
-
-function resolveNojsxDistRoot(fromModuleUrl: string): string {
-	const fromFilePath = fileURLToPath(fromModuleUrl);
-	const requireFromServerModule = createRequire(fromFilePath);
-	const nojsxPackageJsonPath = requireFromServerModule.resolve('@nogg-aholic/nojsx/package.json');
-	return path.join(path.dirname(nojsxPackageJsonPath), 'dist');
+function resolveNojsxDistRoot(): string {
+	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
 async function loadNojsxServerRuntime(nojsxDistRoot: string): Promise<NojsxServerRuntime> {
@@ -170,8 +159,8 @@ export async function startNojsxServer(options: StartNojsxServerOptions): Promis
 	const logPrefix = options.logPrefix ?? '[nojsx]';
 	const development = options.development ?? true;
 	const decoder = new TextDecoder();
-	const nojsxDistRoot = resolveNojsxDistRoot(options.serverModuleUrl);
-	const nrpcDistRoot = resolveNrpcDistRoot(options.serverModuleUrl);
+	const nojsxDistRoot = resolveNojsxDistRoot();
+	const nrpcDistRoot = path.resolve(nojsxDistRoot, '..', '..', 'nrpc', 'dist');
 
 	await waitForFile(generatedLoadersPath);
 	const nojsxRuntime = await loadNojsxServerRuntime(nojsxDistRoot);
