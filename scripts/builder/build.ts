@@ -1,11 +1,51 @@
 import path from "node:path";
+import { cp, mkdir, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { buildGeneratedLoadersModule } from "./consumer/loader-generation.js";
 import { readShellPageLayoutFields } from "./_nojsx/shell-page.js";
 import { renderDevHtmlDocument } from "@nogg-aholic/nojsx/core/shell-page";
 import type { BuildNojsxAppOptions, BuildNojsxAppResolvedPaths } from "./types.js";
 import { existsSync } from "node:fs";
 import { buildAppCss, transpileAppSource, transpileSourceTree } from "./consumer/transpile.js";
-import { mkdir } from "node:fs/promises";
+
+
+const DEFAULT_STATIC_RUNTIME_PACKAGES = ["@nogg-aholic/nojsx", "@nogg-aholic/nrpc"];
+
+function normalizePackageMountName(packageName: string): string {
+	return packageName.startsWith("@nogg-aholic/") ? packageName.slice("@nogg-aholic/".length) : packageName;
+}
+
+function createImportMap(params: {
+	origin: string;
+	target: BuildNojsxAppOptions["target"];
+	extension?: Record<string, string>;
+}): Record<string, string> {
+	const { origin, target, extension } = params;
+	const assetBase = target === "static" ? "./_pkg" : `${origin}/_pkg`;
+	return {
+		"@nogg-aholic/nojsx": `${assetBase}/nojsx/index.js`,
+		"@nogg-aholic/nojsx/": `${assetBase}/nojsx/`,
+		"@nogg-aholic/nojsx/index.js": `${assetBase}/nojsx/index.js`,
+		"@nogg-aholic/nojsx/jsx-runtime": `${assetBase}/nojsx/jsx-runtime.js`,
+		"@nogg-aholic/nojsx/jsx-dev-runtime": `${assetBase}/nojsx/jsx-dev-runtime.js`,
+		"@nogg-aholic/nrpc": `${assetBase}/nrpc/index.js`,
+		"@nogg-aholic/nrpc/": `${assetBase}/nrpc/`,
+		...(extension ?? {}),
+	};
+}
+
+function resolveStaticRuntimePackages(options: BuildNojsxAppOptions): string[] {
+	if (options.target !== "static") {
+		return [];
+	}
+
+	const configured = options.static?.copyRuntimePackages;
+	if (!configured?.length) {
+		return [...DEFAULT_STATIC_RUNTIME_PACKAGES];
+	}
+
+	return Array.from(new Set(configured));
+}
 
 
 function resolveWebsocketUrl(origin: string, websocketUrl?: string): string | undefined {
@@ -58,6 +98,13 @@ function resolveBuildPaths(options: BuildNojsxAppOptions): BuildNojsxAppResolved
 		origin: options.origin,
 		websocketUrl: resolveWebsocketUrl(options.origin, options.websocketUrl),
 		jsxImportSource: options.jsxImportSource ?? "nojsx",
+		target: options.target ?? "dev-server",
+		importMap: createImportMap({
+			origin: options.origin,
+			target: options.target ?? "dev-server",
+			extension: options.importMap?.extend,
+		}),
+		staticRuntimePackages: resolveStaticRuntimePackages(options),
 		repoRoot,
 		srcRoot,
 		upstreamProxyRoot,
@@ -84,19 +131,84 @@ export async function ensureParentDir(filePath: string): Promise<void> {
 }
 async function prepareBuild(paths: BuildNojsxAppResolvedPaths): Promise<BuildPreparation> {
 	const shellLayout = await readShellPageLayoutFields(paths.shellPagePath, { appHostId: paths.appHostId });
-	const stylesHref = paths.outCssPath ? `${paths.origin}/src/styles/app.css` : undefined;
+	const stylesHref = !paths.outCssPath
+		? undefined
+		: paths.target === "static"
+			? "./src/styles/app.css"
+			: `${paths.origin}/src/styles/app.css`;
 	return { shellLayout, stylesHref };
 }
 
 async function writeOutputHtml(paths: BuildNojsxAppResolvedPaths, preparation: BuildPreparation): Promise<void> {
 	const documentHtml = await renderDevHtmlDocument({
-		origin: paths.origin,
+		origin: paths.target === "static" ? "." : paths.origin,
+		importMap: paths.importMap,
 		shellLayout: preparation.shellLayout,
-		websocketUrl: paths.websocketUrl,
+		websocketUrl: paths.target === "static" ? undefined : paths.websocketUrl,
 		stylesHref: preparation.stylesHref
 	});
 	await ensureParentDir(paths.outHtmlPath);
 	await Bun.write(paths.outHtmlPath, documentHtml);
+}
+
+async function copyExportedPackageAssets(params: {
+	packageName: string;
+	appRoot: string;
+	outRoot: string;
+}): Promise<void> {
+	const { packageName, appRoot, outRoot } = params;
+	const requireFromApp = createRequire(path.join(appRoot, "package.json"));
+	const packageJsonPath = requireFromApp.resolve(`${packageName}/package.json`);
+	const packageRoot = path.dirname(packageJsonPath);
+	const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+		exports?: Record<string, { import?: string } | string>;
+		main?: string;
+	};
+	const mountedName = normalizePackageMountName(packageName);
+	const copied = new Set<string>();
+	const copyTarget = async (relativeExportPath: string): Promise<void> => {
+		if (!relativeExportPath.startsWith("./dist/")) {
+			return;
+		}
+		const normalizedPath = relativeExportPath.replace(/^\.\//, "");
+		if (copied.has(normalizedPath)) {
+			return;
+		}
+		copied.add(normalizedPath);
+		const sourcePath = path.join(packageRoot, normalizedPath);
+		const targetPath = path.join(outRoot, "_pkg", mountedName, normalizedPath.replace(/^dist\//, ""));
+		await ensureParentDir(targetPath);
+		await cp(sourcePath, targetPath, { force: true });
+	};
+
+	const exportValues = Object.values(packageJson.exports ?? {});
+	for (const exportValue of exportValues) {
+		if (typeof exportValue === "string") {
+			await copyTarget(exportValue);
+			continue;
+		}
+		if (exportValue?.import) {
+			await copyTarget(exportValue.import);
+		}
+	}
+
+	if (typeof packageJson.main === "string") {
+		await copyTarget(packageJson.main);
+	}
+}
+
+async function copyStaticRuntimePackages(paths: BuildNojsxAppResolvedPaths): Promise<void> {
+	if (paths.target !== "static") {
+		return;
+	}
+
+	for (const packageName of paths.staticRuntimePackages) {
+		await copyExportedPackageAssets({
+			packageName,
+			appRoot: paths.appRoot,
+			outRoot: paths.outRoot,
+		});
+	}
 }
 
 async function writeGeneratedLoaders(paths: BuildNojsxAppResolvedPaths): Promise<void> {
@@ -135,6 +247,7 @@ async function compileBuild(paths: BuildNojsxAppResolvedPaths, options: BuildNoj
 		outCssPath: paths.outCssPath,
 		repoRoot: paths.repoRoot,
 	});
+	await copyStaticRuntimePackages(paths);
 }
 
 export type { BuildNojsxAppOptions } from "./types.js";

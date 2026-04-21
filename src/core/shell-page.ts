@@ -191,14 +191,15 @@ export function renderShellPageParentDocument(props: { title: any; importMap: an
 
 export function renderDevHtmlDocument(params: {
   origin: string;
+  importMap?: Record<string, string>;
   shellLayout: ShellLayoutFields;
   websocketUrl?: string;
   stylesHref?: string;
 }): Promise<string> {
-  const { origin, shellLayout, websocketUrl, stylesHref } = params;
+  const { origin, importMap, shellLayout, websocketUrl, stylesHref } = params;
   return Promise.resolve(renderShellPageParentDocument({
     title: shellLayout.title,
-    importMap: {
+    importMap: importMap ?? {
       "@nogg-aholic/nojsx": `${origin}/_pkg/nojsx/index.js`,
       "@nogg-aholic/nojsx/": `${origin}/_pkg/nojsx/`,
       "@nogg-aholic/nojsx/index.js": `${origin}/_pkg/nojsx/index.js`,

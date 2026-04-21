@@ -1,3 +1,15 @@
+export type BuildNojsxImportMap = Record<string, string>;
+
+export type BuildNojsxAppImportMapOptions = {
+	extend?: BuildNojsxImportMap;
+};
+
+export type BuildNojsxAppTarget = "dev-server" | "static";
+
+export type BuildNojsxAppStaticOptions = {
+	copyRuntimePackages?: string[];
+};
+
 export type BuildNojsxAppDevOptions = {
 	appRoot: string;
 	origin: string;
@@ -8,6 +20,9 @@ export type BuildNojsxAppDevOptions = {
 	pagesRoot?: string;
 	stylesEntry?: string;
 	outDir?: string;
+	importMap?: BuildNojsxAppImportMapOptions;
+	target?: BuildNojsxAppTarget;
+	static?: BuildNojsxAppStaticOptions;
 };
 
 export type BuildNojsxAppOptions = BuildNojsxAppDevOptions;
@@ -43,6 +58,9 @@ export type BuildNojsxAppDevResolvedPaths = {
 	origin: string;
 	websocketUrl?: string;
 	jsxImportSource: string;
+	target: BuildNojsxAppTarget;
+	importMap: BuildNojsxImportMap;
+	staticRuntimePackages: string[];
 	repoRoot: string;
 	srcRoot: string;
 	upstreamProxyRoot: string;

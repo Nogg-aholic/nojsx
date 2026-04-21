@@ -251,6 +251,67 @@ References:
 - [README.md](../README.md)
 - [scripts/refresh-examples.ts](../scripts/refresh-examples.ts)
 
+### Extending the builder import map
+
+`buildNojsxApp(...)` seeds the browser import map for the noJSX and nRPC runtimes.
+
+If your client code needs additional bare browser imports, extend that map explicitly:
+
+```ts
+import { buildNojsxApp } from "nojsx/build-nojsx-app-dev";
+
+await buildNojsxApp({
+  appRoot: ".",
+  origin: "http://127.0.0.1:4174",
+  importMap: {
+    extend: {
+      "@vendor/browser-safe-lib": "http://127.0.0.1:4174/vendor/browser-safe-lib/index.js",
+      "client-shim": "http://127.0.0.1:4174/src/shims/client-shim.js",
+    },
+  },
+});
+```
+
+Notes:
+- this augments the default noJSX import-map entries instead of replacing them,
+- keep entries browser-viable and intentionally client-facing,
+- server-only imports and DLL-backed code should stay outside the browser import map.
+
+### Static export mode
+
+If an app should ship as a standalone browser build without the noJSX app server, use the static target:
+
+```ts
+import { buildNojsxApp } from "nojsx/build-nojsx-app-dev";
+
+await buildNojsxApp({
+  appRoot: ".",
+  origin: "http://127.0.0.1:4174",
+  target: "static",
+});
+```
+
+What changes in static mode:
+- HTML uses relative URLs instead of the dev server origin,
+- runtime package files are copied into `dist/_pkg/...`,
+- browser imports still stay externalized through the import map,
+- no bundling happens.
+
+You can control which package runtimes are copied:
+
+```ts
+await buildNojsxApp({
+  appRoot: ".",
+  origin: "http://127.0.0.1:4174",
+  target: "static",
+  static: {
+    copyRuntimePackages: ["@nogg-aholic/nojsx", "@nogg-aholic/nrpc"],
+  },
+});
+```
+
+This is intended as the safe baseline for standalone apps before any allowlist bundling is introduced.
+
 ## 10. App server and server-side request handling
 
 The package export `nojsx/start-nojsx-server` starts the app server used by the examples.
